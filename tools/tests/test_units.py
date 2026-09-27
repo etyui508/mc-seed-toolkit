@@ -261,6 +261,217 @@ def test_updater_plan():
         updater.MANAGED_FILE = os.path.join(updater.RECORDS, ".managed-files.json")
 
 
+def test_updater_sources():
+    section("更新源：GitHub 主站 + 自己的域名备用")
+    import urllib.error
+    from unittest import mock
+
+    saved = {k: os.environ.get(k) for k in ("MC_UPDATE_CHANNEL", "MC_UPDATE_URL")}
+    try:
+        os.environ.pop("MC_UPDATE_URL", None)
+        os.environ["MC_UPDATE_CHANNEL"] = "stable"
+        urls = updater.manifest_urls()
+        check("稳定版第一优先是 GitHub",
+              urls[0].startswith("https://github.com/etyui508/mc-seed-toolkit/releases/download/")
+              and urls[0].endswith("/manifest/manifest.json"), urls[0])
+        check("第二优先是自己的域名",
+              urls[-1] == "https://mcdownload.bony-doorframe-shortly.top/manifest.json", urls[-1])
+        for u in urls:
+            updater.check_url(u)              # 白名单必须放行自己的两个来源
+        os.environ["MC_UPDATE_CHANNEL"] = "beta"
+        check("测试版取 manifest-beta.json",
+              updater.manifest_urls()[0].endswith("/manifest/manifest-beta.json"),
+              updater.manifest_urls()[0])
+        os.environ["MC_UPDATE_URL"] = "https://mcdownload.bony-doorframe-shortly.top/x.json"
+        check("MC_UPDATE_URL 能整个覆盖（调试/自建镜像）",
+              updater.manifest_urls() == [os.environ["MC_UPDATE_URL"]])
+        os.environ.pop("MC_UPDATE_URL")
+
+        class _Resp:
+            def __init__(self, body):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+        payload = json.dumps({"name": "mc-seed-toolkit", "version": "9.9.9"}).encode()
+        tried = []
+
+        def fake_open(url, timeout=None):
+            tried.append(url)
+            if "github.com" in url:
+                raise urllib.error.URLError("连不上 github")
+            return _Resp(payload)
+
+        with mock.patch.object(updater, "_open", fake_open):
+            man, src = updater.fetch_manifest()
+        check("GitHub 连不上会自动换备用站",
+              man["version"] == "9.9.9" and src.startswith("https://mcdownload."), src)
+        check("两个地址都试过", len(tried) == 2, str(tried))
+        check("备用站清单挂了时间桶参数（躲边缘缓存）", "t=" in src and updater.check_url(src))
+
+        def dead(url, timeout=None):
+            raise urllib.error.URLError("全断")
+
+        with mock.patch.object(updater, "_open", dead):
+            try:
+                updater.fetch_manifest()
+                boom = False
+            except Exception:
+                boom = True
+        check("两边都不通会抛异常（不静默成功）", boom)
+
+        tmp = tempfile.mkdtemp(prefix="mc-fallback-")
+        try:
+            dest = os.path.join(tmp, "x.zip")
+            seen = []
+
+            def fake_download(url, path, *a, **kw):
+                seen.append(url)
+                if "github.com" in url:
+                    raise RuntimeError("主站 404")
+                with open(path, "wb") as fh:
+                    fh.write(b"ok")
+                return 2
+
+            with mock.patch.object(updater, "download", fake_download):
+                used = updater.download_with_fallback(
+                    "https://github.com/etyui508/mc-seed-toolkit/releases/download/v9.9.9/x.zip",
+                    dest, "https://mcdownload.bony-doorframe-shortly.top/x.zip", verbose=False)
+            check("主站下不动会自动换备用站（主站会先重试一次）",
+                  used.startswith("https://mcdownload.") and len(seen) == 3, str(seen))
+            check("备用站是最后一个试的", seen[-1].startswith("https://mcdownload."), str(seen))
+            check("备用站下成功会留下文件", open(dest, "rb").read() == b"ok")
+
+            seen.clear()
+            with mock.patch.object(updater, "download", fake_download):
+                try:
+                    updater.download_with_fallback("https://github.com/x/y.zip", dest, verbose=False)
+                    raised = False
+                except RuntimeError:
+                    raised = True
+            check("没有备用地址时：主站试够次数后照实抛（不静默）",
+                  len(seen) == 2 and raised, str(seen))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        # 清单是从备用站拿到的 -> 包也直接从备用站下，不去白等主站超时
+        man2 = {"version": "9.9.9", "sha256": "a" * 64, "size": 1, "files": {},
+                "url": "https://github.com/etyui508/mc-seed-toolkit/releases/download/v9.9.9/x.zip",
+                "url_backup": "https://mcdownload.bony-doorframe-shortly.top/x.zip"}
+        tmp3 = tempfile.mkdtemp(prefix="mc-src-")
+        try:
+            root3 = os.path.join(tmp3, "t")
+            os.makedirs(os.path.join(root3, "app"))
+            with open(os.path.join(root3, "app", "VERSION"), "w") as fh:
+                fh.write("1.0.0\n")
+            keep = (updater.ROOT, updater.RECORDS, updater.VERSION_FILE)
+            updater.ROOT = root3
+            updater.RECORDS = os.path.join(root3, "记录")
+            updater.VERSION_FILE = os.path.join(root3, "app", "VERSION")
+            got_args = {}
+
+            def fake_dl(primary, dest, backup=None, *a, **kw):
+                got_args["primary"] = primary
+                got_args["backup"] = backup
+                return primary
+
+            with mock.patch.object(updater, "fetch_manifest",
+                                   lambda: (man2, man2["url_backup"] + "?t=1")), \
+                 mock.patch.object(updater, "verify_release", lambda m: (True, "ok")), \
+                 mock.patch.object(updater, "_preflight", lambda: (True, "")), \
+                 mock.patch.object(updater, "download_with_fallback", fake_dl), \
+                 mock.patch.object(updater, "apply_zip",
+                                   lambda zp, verbose=True: {"changed": 0, "skipped": 0,
+                                                             "failed": []}), \
+                 mock.patch.object(updater, "plan", lambda m: None):
+                okupd, _msg = updater.update(verbose=False)
+            check("清单来自备用站时，包也先从备用站下",
+                  got_args.get("primary", "").startswith("https://mcdownload."), str(got_args))
+            check("主站还留着当后手",
+                  got_args.get("backup", "").startswith("https://github.com"), str(got_args))
+            updater.ROOT, updater.RECORDS, updater.VERSION_FILE = keep
+        finally:
+            shutil.rmtree(tmp3, ignore_errors=True)
+
+        # 断点续传：下半截已经在磁盘上，只把剩下的拉回来
+        tmp2 = tempfile.mkdtemp(prefix="mc-resume-")
+        try:
+            body = b"ABCDEFGHIJ" * 100
+            dest2 = os.path.join(tmp2, "part.bin")
+            half = body[:len(body) // 2]
+            with open(dest2, "wb") as fh:
+                fh.write(half)
+            asked = {}
+
+            class _Resp:
+                status = 206
+
+                def __init__(self, data):
+                    self._data = data
+
+                def read(self, n=-1):
+                    chunk, self._data = self._data[:n], self._data[n:]
+                    return chunk
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def close(self):
+                    pass
+
+            def fake_open(url, timeout=None, headers=None):
+                asked["range"] = (headers or {}).get("Range")
+                return _Resp(body[len(half):])
+
+            with mock.patch.object(updater, "_open", fake_open):
+                got = updater.download("https://mcdownload.bony-doorframe-shortly.top/x.zip", dest2,
+                                       expect_sha256=hashlib.sha256(body).hexdigest(),
+                                       expect_size=len(body), stall_timeout=1)
+            check("断了能接着下（发 Range 只要剩下的）",
+                  asked["range"] == f"bytes={len(half)}-" and got == len(body), str(asked))
+            check("续下之后文件是完整的", open(dest2, "rb").read() == body)
+
+            # 已经下完的包不会重下
+            calls = {"n": 0}
+
+            def boom(*a, **kw):
+                calls["n"] += 1
+                raise AssertionError("不该再开连接")
+
+            with mock.patch.object(updater, "_open", boom):
+                got = updater.download("https://mcdownload.bony-doorframe-shortly.top/x.zip", dest2,
+                                       expect_sha256=hashlib.sha256(body).hexdigest(),
+                                       expect_size=len(body))
+            check("上一轮已经下完的包直接认（不重复下载）",
+                  calls["n"] == 0 and got == len(body))
+        finally:
+            shutil.rmtree(tmp2, ignore_errors=True)
+
+        base = {"name": "mc-seed-toolkit", "version": "9.9.9", "sha256": "a" * 64, "size": 1}
+        gh = "https://github.com/etyui508/mc-seed-toolkit/releases/download/v9/x.zip"
+        own = "https://mcdownload.bony-doorframe-shortly.top/x.zip"
+        with mock.patch.object(updater.release, "verify_manifest",
+                               lambda m, keys=None: (True, "签名有效")):
+            ok, why = updater.verify_release(dict(base, url=gh, url_backup=own))
+            check("主站 + 自己的域名：验过", ok, why)
+            ok2, why2 = updater.verify_release(
+                dict(base, url=gh, url_backup="https://evil.example.com/x.zip"))
+            check("备用地址被指到别人家：拒收", not ok2 and "url_backup" in why2, why2)
+            ok3, why3 = updater.verify_release(
+                dict(base, url="http://mcdownload.bony-doorframe-shortly.top/x.zip"))
+            check("明文 http：拒收", not ok3, why3)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 # ---------------------------------------------------------------- 打包 / 配置
 def test_export():
     section("结果导出（剪贴板 / txt / json / mcfunction）")
@@ -351,6 +562,7 @@ def main():
     test_diag()
     test_updater_apply()
     test_updater_plan()
+    test_updater_sources()
     test_export()
     test_terminal_width()
     test_packaging()

@@ -3,11 +3,14 @@
 """
 自动更新
 
-每次启动工具时，去下载站看一眼 manifest.json：
+每次启动工具时，去看一眼线上清单：
   · 线上版本比本地新  -> 下载 zip、校验 sha256、解压覆盖到工具目录
   · 一样 / 网络不通    -> 什么都不做（不会卡启动，最多等几秒）
 
-下载站： https://mcdownload.bony-doorframe-shortly.top/manifest.json
+两个来源，主站连不上自动换备用站（两边内容一样，都带签名）：
+  主站（GitHub）  https://github.com/etyui508/mc-seed-toolkit/releases/download/manifest/manifest.json
+  备用（自己的域名）https://mcdownload.bony-doorframe-shortly.top/manifest.json
+下载包也一样：先走 GitHub Releases，失败了再走自己的域名。
 换地址： 改环境变量 MC_UPDATE_URL；想关掉自动更新：MC_NO_UPDATE=1
 
 更新时**绝不动**这些东西： .mc-tool.json（你的种子）、记录/、logs/、.build-cache/、runtime/
@@ -46,6 +49,13 @@ CHANNELS = {
 CHANNEL_NAMES = {"stable": "稳定版", "beta": "测试版"}
 DEFAULT_CHANNEL = "stable"
 TIMEOUT = 6                      # 秒：没网的时候最多卡这么久，然后当没事发生
+# 下载大包时的"卡住"判定：多久没有新数据才认为这条连接死了（不是总时长）。
+# 断点续传是免费的，所以宁可早点判定"这条连接死了"重开一条 —— 20 秒没新数据
+# 就换连接，比干等 45 秒强。慢但一直在出数据的连接不受影响（数据一直在到）。
+STALL_TIMEOUT = 20
+DL_ATTEMPTS = 8                  # 同一个地址最多试几次（每次都是从断点接着下）
+FETCH_TIMEOUT = 8                # 单个更新源最多等这么久
+FETCH_GRACE = 1.2                # 主站（GitHub）的优先权：这么多秒内回来就用它
 # 只认这个域名。万一有人把 MC_UPDATE_URL 指到别处，下面的签名校验才是最后一道锁。
 ALLOWED_HOSTS = ("mcdownload.bony-doorframe-shortly.top",)
 # 没签名也要更新（只应该在自己调试的时候用）
@@ -77,6 +87,20 @@ def manifest_url():
 
 
 MANIFEST_URL = manifest_url()
+# 主站是 GitHub Releases：清单固定挂在 "manifest" 这个标签下（两个通道各一份），
+# 更新包挂在 v<版本号> 标签下。GitHub 连不上就自动退回自己的域名 —— 两边内容一样，都带签名。
+GITHUB_BASE = "https://github.com/etyui508/mc-seed-toolkit/releases/download"
+GH_MANIFEST_TAG = "manifest"
+GH_MANIFESTS = {"stable": "manifest.json", "beta": "manifest-beta.json"}
+ALLOWED_HOSTS = ("mcdownload.bony-doorframe-shortly.top", "github.com",
+                 "objects.githubusercontent.com", "release-assets.githubusercontent.com")
+STANDBY_HOSTS = ALLOWED_HOSTS
+# 备用站走 Cloudflare：清单万一被边缘节点缓存住，客户端就会有几个小时看不到新版本。
+# 所以每次问的时候挂一个"时间桶"参数 —— 换个桶就是新 URL，边上没有旧货可端。
+# （5 分钟一个桶：同一个桶里的重复请求还能吃到缓存，不会把下载站打爆；发布时
+#   publish.sh 会把接下来几个桶先"保温"好，所以新版本最多 5 分钟就全网可见，
+#   而且第一个用户也不用等回源）
+CACHE_BUCKET = 300
 # 必须带一个自己的 User-Agent：Cloudflare 会把默认的 "Python-urllib/3.x" 当爬虫拦掉(403)
 BROWSER_UA = "Mozilla/5.0 (compatible; mc-seed-toolkit-updater)"
 
@@ -155,11 +179,83 @@ def is_newer(remote, local):
 
 
 # ------------------------------------------------------------------ 网络
+def manifest_urls():
+    """清单的几个地址，按优先级排：GitHub 主站 -> 自己的域名备用"""
+    if os.environ.get("MC_UPDATE_URL"):
+        return [os.environ["MC_UPDATE_URL"]]
+    ch = channel()
+    gh = f"{GITHUB_BASE}/{GH_MANIFEST_TAG}/{GH_MANIFESTS.get(ch, 'manifest.json')}"
+    own = BASE_URL + CHANNELS.get(ch, CHANNELS[DEFAULT_CHANNEL])
+    return [gh, own]
+
+
 def fetch_manifest():
-    """拿线上的 manifest；任何问题都抛异常，交给调用方决定怎么办"""
-    check_url(MANIFEST_URL)
-    man = json.loads(_open(MANIFEST_URL).read().decode("utf-8"))
-    return man
+    """拿线上的 manifest：主站连不上就自动换备用站。
+
+    两个地址同时问，谁先回来用谁 —— 但主站（GitHub）有优先权：先给它一点点时间，
+    它在宽限期内回来就用它。这样"GitHub 被墙"的时候启动不会被卡住等超时。
+
+    返回 (清单, 用的哪个地址)；全都失败才抛异常。
+    """
+    urls = [_fresh_url(u) for u in manifest_urls()]
+    if len(urls) == 1:                                # 只有一个地址（调试/自建镜像）
+        url = urls[0]
+        check_url(url)
+        return json.loads(_open(url).read().decode("utf-8")), url
+
+    import threading
+    lock = threading.Lock()
+    out = {}
+    ping = threading.Event()
+
+    def worker(u):
+        try:
+            check_url(u)
+            man = json.loads(_open(u, timeout=FETCH_TIMEOUT).read().decode("utf-8"))
+        except Exception as e:
+            man = e
+        with lock:
+            out[u] = man
+        ping.set()
+
+    for u in urls:
+        threading.Thread(target=worker, args=(u,), daemon=True).start()
+
+    primary = urls[0]
+    grace = time.monotonic() + FETCH_GRACE
+    deadline = time.monotonic() + FETCH_TIMEOUT + 2
+    while True:
+        with lock:
+            done = dict(out)
+        if isinstance(done.get(primary), dict):
+            return done[primary], primary             # 主站回来的话就用主站
+        if len(done) == len(urls):
+            break                                      # 都有结果了
+        if time.monotonic() >= grace and any(isinstance(v, dict) for v in done.values()):
+            for u in urls:                             # 主站慢了：谁先回信用谁（两边一样）
+                if isinstance(done.get(u), dict):
+                    return done[u], u
+        if time.monotonic() >= deadline:
+            break
+        ping.wait(0.1)
+        ping.clear()
+
+    for u in urls:
+        if isinstance(out.get(u), dict):
+            return out[u], u
+    errs = [out[u] for u in urls if isinstance(out.get(u), Exception)]
+    raise errs[0] if errs else RuntimeError("没有可用的更新地址")
+
+
+def _fresh_url(url):
+    """给备用站（自己的域名）的清单挂个时间桶参数，绕过 Cloudflare 的边缘缓存。
+
+    GitHub 那边不用动：它本来就每次回源。别的地址（调试自建镜像）也不动。
+    """
+    if "mcdownload.bony-doorframe-shortly.top" not in url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}t={int(time.time() // CACHE_BUCKET)}"
 
 
 def check_url(url):
@@ -187,7 +283,14 @@ def verify_release(man):
     for field in ("url", "sha256", "size"):
         if not man.get(field):
             return False, f"清单里缺少 {field}"
-    check_url(str(man["url"]))                    # 下载地址也要过白名单
+    # 下载地址也要过白名单；备用地址（自己的域名）同理，不然主站被墙时等于把用户往别人家送
+    for field in ("url", "url_backup"):
+        if not man.get(field):
+            continue
+        try:
+            check_url(str(man[field]))
+        except ValueError as e:
+            return False, f"{field} 不安全：{e}"
     return True, "签名有效"
 
 
@@ -195,9 +298,9 @@ def _agent():
     return f"mc-seed-toolkit/{local_version()}"
 
 
-def _open(url, timeout=None):
+def _open(url, timeout=None, headers=None):
     """打开一个 URL；万一被 Cloudflare 按 UA 拦了，换浏览器式 UA 再试一次"""
-    headers = {"User-Agent": _agent(), "Cache-Control": "no-cache"}
+    headers = dict({"User-Agent": _agent(), "Cache-Control": "no-cache"}, **(headers or {}))
     try:
         return urllib.request.urlopen(
             urllib.request.Request(url, headers=headers), timeout=timeout or TIMEOUT)
@@ -209,10 +312,106 @@ def _open(url, timeout=None):
             urllib.request.Request(url, headers=headers), timeout=timeout or TIMEOUT)
 
 
-def download(url, dest, expect_sha256=None, expect_size=None, on_progress=None):
+def progress_printer(label="下载更新包"):
+    """给下载过程挂个进度：每 0.3 秒刷一行。不是终端就不刷 —— 日志里保持干净。
+    （调试/自动化想留痕的话设 MC_UPDATE_PROGRESS=1）"""
+    state = {"t": 0.0, "done": False}
+
+    def show(got, total):
+        if state["done"]:
+            return
+        if not sys.stdout.isatty() and os.environ.get("MC_UPDATE_PROGRESS") != "1":
+            return
+        total = int(total) if total else 0
+        if total and got < total:
+            now = time.time()
+            if now - state["t"] < 0.3:
+                return
+            state["t"] = now
+        if total:
+            pct = min(100, got * 100 // total)
+            print(f"\r  {label} {got / 1048576:5.1f}/{total / 1048576:.1f} MB  {pct:3d}%",
+                  end="", flush=True)
+        else:
+            print(f"\r  {label} {got / 1048576:5.1f} MB", end="", flush=True)
+        if total and got >= total:
+            state["done"] = True
+            print()
+
+    return show
+
+
+def _hash_prefix(path, upto):
+    """把已经下在磁盘上的那半截读回来算哈希（断点续传要从中间接着算）"""
     h = hashlib.sha256()
-    got = 0
-    with _open(url, timeout=TIMEOUT * 10) as resp, open(dest, "wb") as out:
+    left = upto
+    with open(path, "rb") as fh:
+        while left > 0:
+            buf = fh.read(min(256 * 1024, left))
+            if not buf:
+                break
+            h.update(buf)
+            left -= len(buf)
+    return h
+
+
+def download(url, dest, expect_sha256=None, expect_size=None, on_progress=None,
+             stall_timeout=None, attempts=None):
+    """下载到 dest 并算 sha256。
+
+    网络慢、中途卡住、或者干脆断了都没关系：服务器支持 Range 的话会从断的地方
+    接着下（下一条连接继续拉剩下的部分），不用从头再来。stall_timeout 是
+    "多久没有新数据才算死"，不是总时长 —— 家里带宽小的时候这一点很关键。
+    """
+    stall = stall_timeout or STALL_TIMEOUT
+    attempts = attempts or DL_ATTEMPTS
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return _download_once(url, dest, expect_sha256, expect_size, on_progress, stall)
+        except urllib.error.HTTPError as e:
+            if e.code not in (403, 406, 408, 429, 500, 502, 503, 504):
+                raise                     # 404/410 这种重试也没用，直接说
+            last = e
+        except Exception as e:
+            last = e
+        if i < attempts:
+            time.sleep(1.5)               # 喘口气，然后从断点接着下
+    raise last if last else RuntimeError("下载没成")
+
+
+def _download_once(url, dest, expect_sha256=None, expect_size=None, on_progress=None,
+                   stall=None):
+    """下这一次（能接着上次的进度就接着下）。"""
+    stall = stall or STALL_TIMEOUT
+    have = os.path.getsize(dest) if os.path.exists(dest) else 0
+    if expect_size and have > int(expect_size):
+        have = 0                                  # 上次下的不是同一个包，从头来
+    if expect_size and have == int(expect_size):
+        if not expect_sha256 or _sha256_file(dest).lower() == str(expect_sha256).lower():
+            if on_progress:
+                on_progress(have, expect_size)
+            return have                           # 上一轮其实已经下完了
+        have = 0
+
+    h = _hash_prefix(dest, have) if have else hashlib.sha256()
+    resp = None
+    if have:
+        try:
+            resp = _open(url, timeout=stall, headers={"Range": f"bytes={have}-"})
+            if getattr(resp, "status", 200) != 206:      # 服务器不给续传：老老实实重下
+                resp.close()
+                resp = None
+                have, h = 0, hashlib.sha256()
+        except urllib.error.HTTPError as e:
+            if e.code not in (416, 400, 200, 206):
+                raise
+            have, h = 0, hashlib.sha256()
+    if resp is None:
+        resp = _open(url, timeout=stall)
+
+    got = have
+    with resp, open(dest, "ab" if have else "wb") as out:
         while True:
             chunk = resp.read(256 * 1024)
             if not chunk:
@@ -222,12 +421,47 @@ def download(url, dest, expect_sha256=None, expect_size=None, on_progress=None):
             got += len(chunk)
             if on_progress:
                 on_progress(got, expect_size)
-    if expect_size and got != expect_size:
+    if expect_size and got != int(expect_size):
         raise RuntimeError(f"大小对不上（收到 {got}，清单说应该是 {expect_size}）"
                            f"—— 可能是下载站的缓存还没过期，过几分钟再试一次")
     if expect_sha256 and h.hexdigest().lower() != str(expect_sha256).lower():
         raise RuntimeError("sha256 校验失败（下载不完整或者线上文件被换过）")
     return got
+
+
+def download_with_fallback(primary, dest, backup=None, expect_sha256=None,
+                           expect_size=None, on_progress=None, verbose=True,
+                           tries=2):
+    """先走主站（GitHub），不行就自动换备用站（自己的域名）。
+
+    同一个源会先重试一次 —— 家里带宽小的时候容易断在半路，断了也是从断点接着下，
+    所以多试一次很划算。返回实际下成功的那条地址；两边都失败才抛异常。
+    """
+    urls = [u for u in (primary, backup) if u]
+    if backup and backup == primary:
+        urls = [primary]
+    names = {primary: "主站（GitHub）", backup: "备用站（自己的域名）"}
+    fails = []
+    for i, url in enumerate(urls):
+        for attempt in range(1, max(1, tries) + 1):
+            try:
+                download(url, dest, expect_sha256, expect_size, on_progress)
+                return url
+            except Exception as e:
+                fails.append(f"{names.get(url, url)}：{e}")
+                if verbose:
+                    print(f"  ⚠ {names.get(url, url)} 第 {attempt} 次没下来：{e}")
+                if attempt < tries and verbose:
+                    print("    接着试（已下的部分会续上，不白下）…")
+        if i + 1 < len(urls):
+            if os.path.exists(dest):
+                try:
+                    os.remove(dest)          # 换源就从头来，别把两个源的半截拼一起
+                except OSError:
+                    pass
+            if verbose:
+                print("    换备用站（自己的域名）再试一次…")
+    raise RuntimeError("这次没下下来 —— " + "；".join(fails))
 
 
 # ------------------------------------------------------------------ 解压覆盖
@@ -660,8 +894,7 @@ def check():
     """问一下线上有没有新版本。返回 (manifest, 提示语)；网络不通返回 (None, 原因)"""
     local = local_version()
     try:
-        check_url(MANIFEST_URL)
-        man = fetch_manifest()
+        man, _src = fetch_manifest()
     except urllib.error.HTTPError as e:
         if e.code == 404 and channel() != DEFAULT_CHANNEL:
             return None, f"这个通道还没有发布过（{CHANNEL_NAMES[channel()]}）"
@@ -687,7 +920,7 @@ def update(force=False, verbose=True):
     """检查 + 更新。返回 (是否更新了, 说明文字)"""
     local = local_version()
     try:
-        man = fetch_manifest()
+        man, src = fetch_manifest()
     except urllib.error.HTTPError as e:
         if e.code == 404 and channel() != DEFAULT_CHANNEL:
             return False, ""              # 测试版通道还没发过东西：安静点，别每次启动都念
@@ -708,14 +941,33 @@ def update(force=False, verbose=True):
                        f"     可能是下载站被篡改了，先别更新，去群里问一下。")
     if not trust:
         print("  ⚠ 正在用 MC_UPDATE_ALLOW_UNSIGNED=1 跳过签名校验（只有调试该这么干）")
-    try:
-        check_url(str(man.get("url") or ""))
-    except ValueError as e:
-        return False, f"下载地址不安全：{e}"
 
-    url = man.get("url") or (BASE_URL + "/" + str(man.get("zip") or ""))
-    if not url or url.endswith("/"):
+    # 主地址（GitHub）+ 备用地址（自己的域名）。清单里地址不合法的一律不要。
+    primary = str(man.get("url") or "").strip()
+    backup = str(man.get("url_backup") or "").strip()
+    if not primary:
+        primary, backup = backup, ""
+    for field, value in (("url", primary), ("url_backup", backup)):
+        if not value:
+            continue
+        try:
+            check_url(value)
+        except ValueError as e:
+            if field == "url":
+                return False, f"下载地址不安全：{e}"
+            print(f"  ⚠ 备用地址不安全，这次不用它：{e}")
+            backup = ""
+    if not primary or primary.endswith("/"):
         return False, "manifest 里没写下载地址，跳过"
+    if backup == primary:
+        backup = ""
+
+    # 清单是从哪个源拿到的，包就优先从哪个源下：
+    # 主站（GitHub）刚才连不上的话，这里就不用再白等一轮超时了
+    if backup and src and BASE_URL in src:
+        primary, backup = backup, primary
+        if verbose:
+            print("  （刚才清单是从备用站拿的，包也从备用站下）")
 
     if verbose:
         size = man.get("size")
@@ -732,7 +984,9 @@ def update(force=False, verbose=True):
 
     tmp_zip = os.path.join(tempfile.gettempdir(), f"mc-update-{remote}.zip")
     try:
-        download(url, tmp_zip, man.get("sha256"), man.get("size"))
+        download_with_fallback(primary, tmp_zip, backup,
+                               man.get("sha256"), man.get("size"),
+                               on_progress=progress_printer(), verbose=verbose)
         if verbose:
             _report_diffs(tmp_zip, local, remote)
         result = apply_zip(tmp_zip, verbose=verbose)

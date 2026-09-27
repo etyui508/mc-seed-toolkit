@@ -363,6 +363,8 @@ def update_panel(man):
     lines.append("")
     lines.append(ui.s("更新时每个文件都会列出改了多少行，完整 diff 存到", "hint"))
     lines.append(ui.s("记录/更新日志/。你的种子、坐标记录、自带 Java 都不会被动。", "hint"))
+    if man.get("url_backup"):
+        lines.append(ui.s("下载走主站（GitHub），连不上自动换备用站。", "hint"))
     print()
     print(ui.box(lines, title="发现新版本"))
 
@@ -380,7 +382,10 @@ def do_update():
     print("  " + (ui.ok(msg) if man else ui.info(msg)))
     if not man:
         return
-    print("  " + ui.kv([("下载地址", ui.s(man.get("url") or man.get("zip"), "val"))], gap=1))
+    print("  " + ui.kv([("主站", ui.s(man.get("url") or man.get("zip") or "-", "val")),
+                        ("备用", ui.s(man.get("url_backup") or "（没有）", "dim"))], gap=1))
+    if man.get("url_backup"):
+        print("  " + ui.s("  主站（GitHub）连不上会自动走备用站，两边内容一样、都带签名", "hint"))
     if man.get("notes"):
         print("  " + ui.kv([("更新说明", man["notes"])], gap=1))
     # 下载之前就把差异摆出来 —— 让人知道到底改了什么再决定
