@@ -1,3 +1,4 @@
+struct:ancient_cities:12,-62,6
 struct:end_cities:1066,26,2
 struct:end_cities:1066,26,3
 struct:end_cities:1101,25,2
@@ -5,3 +6,9 @@ struct:end_cities:465,21,4
 struct:end_cities:483,6,2
 struct:end_cities:519,21,2
 struct:end_cities:682,24,4
+struct:nether_complexes:-10,-12,6
+struct:ocean_monuments:-50,-24,4
+struct:ocean_monuments:-50,-25,2
+struct:ocean_monuments:-51,-26,2
+struct:ruined_portals:12,-61,2
+struct:ruined_portals:5,4,2

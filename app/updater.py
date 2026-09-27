@@ -266,6 +266,10 @@ def check_url(url):
         raise ValueError(f"更新地址必须是 https（现在是 {u.scheme or '空'}）")
     if ALLOWED_HOSTS and u.hostname not in ALLOWED_HOSTS:
         raise ValueError(f"更新地址不是我们认可的域名：{u.hostname}")
+    if u.port not in (None, 443):
+        raise ValueError(f"更新地址带了奇怪的端口：{u.port}")
+    if u.username or u.password:
+        raise ValueError("更新地址里塞了用户名/密码，不对劲")
     return True
 
 

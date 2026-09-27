@@ -133,12 +133,15 @@ def main():
         try:
             os.remove(os.path.join(fresh, ".mc-tool.json"))
             env_extra = {"MC_ONBOARD": "1"}          # 管道里不是真终端，这里强制走一遍
-            keys = "y\n\n\n\n\n\n0\n"                # 一路回车 + 最后退到主菜单选 0
+            # 第一个回车 = 语言选默认（中文）；后面一路回车；最后退到主菜单选 0
+            keys = "\n" + "y\n\n\n\n\n\n0\n"
             out, rc, dt = run(fresh, ["app/tool.py"], stdin=keys, timeout=300, env_extra=env_extra)
             check("引导真的跑起来了", "欢迎用 MC 种子工具包" in out and "配好了" in out, f"{dt:.1f}s")
+            check("语言是第一件事问的", "请选择语言" in out and "Choose your language" in out)
             cfg_path = os.path.join(fresh, ".mc-tool.json")
             check("配置是引导的时候现写的", os.path.isfile(cfg_path))
             made = json.load(open(cfg_path, encoding="utf-8"))
+            check("语言记下来了", made.get("lang") in ("zh", "en"), str(made.get("lang")))
             check("引导完记了 onboarded 标记", str(made.get("onboarded", "")).startswith("1:"),
                   str(made.get("onboarded")))
             check("版本也配好了", bool(made.get("mc")), str(made.get("mc")))

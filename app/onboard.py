@@ -16,9 +16,13 @@ import os
 import sys
 
 import config as cfgmod
+import i18n
 import ui
 
 ONBOARD_VERSION = "1"      # 引导流程改版了就 +1，老用户会再走一遍（依旧可以一路回车）
+
+# 界面文字都过一遍 i18n；查不到译文就原样显示中文
+_ = i18n.t
 
 
 def needed(cfg):
@@ -58,7 +62,28 @@ def backfill(cfg, save=None):
 
 def _step(n, title):
     print()
-    print("  " + ui.s(f"[{n}/5] ", "dim") + ui.s(title, "accent"))
+    print("  " + ui.s(f"[{n}/5] ", "dim") + ui.s(_(title), "accent"))
+
+
+def _pick_language(ask, cfg):
+    """第一件事：问语言。
+
+    这时候还不知道用哪种语言，所以这一屏本身是双语的。
+    """
+    default = "1" if i18n.guess_from_system() == "zh" else "2"
+    print()
+    print(ui.box([
+        ui.s("请选择语言  /  Choose your language", "accent"),
+        "",
+        "    " + ui.s("1", "key") + ") 中文",
+        "    " + ui.s("2", "key") + ") English",
+    ], title="欢迎 / Welcome"))
+    raw = ask(f"  语言 / Language [{default}]: ", default=default, allow_empty=True)
+    answer = str(raw or default).strip().lower()
+    code = "en" if answer in ("2", "en", "english", "英文") else "zh"
+    i18n.set_lang(code)
+    cfg["lang"] = code
+    return code
 
 
 def _pick_version(ask, cfg, versions):
@@ -72,9 +97,9 @@ def _pick_version(ask, cfg, versions):
         # 一行四个，省得刷屏
         for i in range(0, len(lines), 4):
             print("    " + "   ".join(lines[i:i + 4]))
-        print("    " + ui.s(f"（这 {len(versions)} 个版本包里都带现成模组；"
-                            f"别的版本也能用，就是要自己编模组）", "hint"))
-    raw = ask(f"  版本编号（或直接输版本号）[{cur}]: ", default=cur)
+        print("    " + ui.s(_("（这 {n} 个版本包里都带现成模组；别的版本也能用，就是要自己编模组）",
+                              n=len(versions)), "hint"))
+    raw = ask(f"  {_('版本编号（或直接输版本号）')}[{cur}]: ", default=cur)
     raw = (raw or "").strip()
     if raw.isdigit() and versions and 1 <= int(raw) <= len(versions):
         return versions[int(raw) - 1]
@@ -84,19 +109,20 @@ def _pick_version(ask, cfg, versions):
 def _pick_save(ask, cfg):
     """下载器把存档存哪儿了（可选，以后算种子要用）"""
     cur = cfg.get("save") or ""
-    hint = "存档目录（WorldDownloader 存出来的那个文件夹，里面是 level.dat）"
-    raw = ask(f"  {hint}[{cur or '先不填（回车跳过）'}]: ", allow_empty=True)
+    hint = _("存档目录（下载器存出来的那个文件夹，里面是 level.dat）")
+    skip = _("先不填（回车跳过）")
+    raw = ask(f"  {hint}[{cur or skip}]: ", allow_empty=True)
     raw = (raw or "").strip()
     if not raw:
         return cur
     path = cfgmod.adapt_path(raw)
     if not os.path.exists(path):
-        print("    " + ui.warn("这个路径现在不存在 —— 先记下了，之后可以改（主菜单 3）"))
+        print("    " + ui.warn(_("这个路径现在不存在 —— 先记下了，之后可以改（主菜单 3）")))
     else:
         has_level = os.path.isfile(os.path.join(path, "level.dat"))
-        print("    " + (ui.ok("看着对，里面有 level.dat")
+        print("    " + (ui.ok(_("看着对，里面有 level.dat"))
                         if has_level else
-                        ui.warn("路径在，但没看到 level.dat —— 可能是上一级目录？")))
+                        ui.warn(_("路径在，但没看到 level.dat —— 可能是上一级目录？"))))
     return path
 
 
@@ -105,24 +131,25 @@ def _pick_java(ask, cfg):
     found = cfgmod.find_java()
     if found:
         major = cfgmod.check_java(found) or "?"
-        print("    " + ui.ok(f"自动找到了 Java {major}：{ui.fit(found, 52)}"))
-        raw = ask("  就用它吗？[Y/n]: ", default="y")
+        print("    " + ui.ok(_("自动找到了 Java {major}：{path}",
+                              major=major, path=ui.fit(found, 52))))
+        raw = ask(f"  {_('就用它吗？')}[Y/n]: ", default="y")
         if (raw or "y").strip().lower() not in ("n", "no", "不"):
             return found
     else:
-        print("    " + ui.warn("没自动找到 Java（算种子/查结构要用它）"))
+        print("    " + ui.warn(_("没自动找到 Java（算种子/查结构要用它）")))
         for line in cfgmod.java_hint().splitlines():
             print("    " + ui.s(line, "hint"))
-    raw = ask(f"  Java 路径（不想填就回车）[{cfg.get('java') or '空'}]: ", allow_empty=True)
+    raw = ask(f"  {_('Java 路径（不想填就回车）')}[{cfg.get('java') or _('空')}]: ", allow_empty=True)
     raw = (raw or "").strip()
     if not raw:
         return cfg.get("java")
     path = cfgmod.adapt_path(raw)
     major = cfgmod.check_java(path)
     if major:
-        print("    " + ui.ok(f"这个 Java 能跑（Java {major}）"))
+        print("    " + ui.ok(_("这个 Java 能跑（Java {major}）", major=major)))
         return path
-    print("    " + ui.err("这个 java 跑不起来（路径不对 / 版本太老 / 不是本系统的版本）"))
+    print("    " + ui.err(_("这个 java 跑不起来（路径不对 / 版本太老 / 不是本系统的版本）")))
     return cfg.get("java")
 
 
@@ -132,19 +159,25 @@ def run(ask, cfg, versions=None, save=None):
     ask  —— 问一句拿一个答案，签名跟 tool.ask 一样（(提示, 默认值) -> 字符串）
     save —— 存配置的函数（一般是 config.save），传了就每步存一次，中途关掉也不丢
     """
+    # 第一件事永远是问语言 —— 后面所有话都按它来
+    if not cfg.get("lang"):
+        _pick_language(ask, cfg)
+        if save:
+            save(cfg)
+
     print()
     print(ui.box([
-        ui.s("第一次用，先花半分钟把这几样配一下", "accent"),
+        ui.s(_("第一次用，先花半分钟把这几样配一下"), "accent"),
         "",
-        ui.s("配置文件放在本地（.mc-tool.json），包里默认一份都不带 ——", "hint"),
-        ui.s("种子、存档路径这些只存在你自己电脑上。", "hint"),
+        ui.s(_("配置文件放在本地（.mc-tool.json），包里默认一份都不带 ——"), "hint"),
+        ui.s(_("种子、存档路径这些只存在你自己电脑上。"), "hint"),
         "",
-        ui.s("每一步都能直接回车用默认值，也可以随时输 q 跳过；", "hint"),
-        ui.s("以后想改：主菜单 3【设置】。", "hint"),
-    ], title="欢迎用 MC 种子工具包"))
+        ui.s(_("每一步都能直接回车用默认值，也可以随时输 q 跳过；"), "hint"),
+        ui.s(_("以后想改：主菜单 3【设置】。"), "hint"),
+    ], title=_("欢迎用 MC 种子工具包")))
     print()
-    if (ask("  现在配一下吗？[Y/n]: ", default="y") or "y").strip().lower() in ("n", "no", "不", "q"):
-        print("  " + ui.info("那先跳过 —— 配置是空的，用到的时候工具会再问你"))
+    if (ask(f"  {_('现在配一下吗？')}[Y/n]: ", default="y") or "y").strip().lower() in ("n", "no", "不", "q"):
+        print("  " + ui.info(_("那先跳过 —— 配置是空的，用到的时候工具会再问你")))
         cfg["onboarded"] = f"{ONBOARD_VERSION}:skipped"
         if save:
             save(cfg)
@@ -152,14 +185,14 @@ def run(ask, cfg, versions=None, save=None):
 
     # ① 游戏版本
     _step(1, "你玩哪个版本？（决定结构怎么生成、群系怎么判）")
-    print("    " + ui.s("不确定就用默认（列表里最新那个）—— 以后随时能在设置里改", "hint"))
+    print("    " + ui.s(_("不确定就用默认（列表里最新那个）—— 以后随时能在设置里改"), "hint"))
     cfg["mc"] = _pick_version(ask, cfg, versions)
     if save:
         save(cfg)
 
     # ② 存档目录（可选）
     _step(2, "下载器存出来的存档在哪儿？（可选）")
-    print("    " + ui.s("用来从存档反推种子。现在不知道也没事，回车跳过。", "hint"))
+    print("    " + ui.s(_("用来从存档反推种子。现在不知道也没事，回车跳过。"), "hint"))
     cfg["save"] = _pick_save(ask, cfg)
     if save:
         save(cfg)
@@ -172,9 +205,9 @@ def run(ask, cfg, versions=None, save=None):
 
     # ④ 更新通道
     _step(4, "更新通道")
-    print("    " + ui.s("1) 稳定版　只给你测试过、确认没问题的版本（推荐）", "hint"))
-    print("    " + ui.s("2) 测试版　新功能先到手，但也可能碰到半成品", "hint"))
-    raw = ask(f"  选哪个？[当前={cfg.get('channel') or 'stable'}]: ", allow_empty=True)
+    print("    " + ui.s(_("1) 稳定版　只给你测试过、确认没问题的版本（推荐）"), "hint"))
+    print("    " + ui.s(_("2) 测试版　新功能先到手，但也可能碰到半成品"), "hint"))
+    raw = ask(f"  {_('选哪个？')}[{_('当前')}={cfg.get('channel') or 'stable'}]: ", allow_empty=True)
     if (raw or "").strip():
         cfg["channel"] = "beta" if raw.strip() in ("2", "beta", "测试", "测试版") else "stable"
     if save:
@@ -182,8 +215,8 @@ def run(ask, cfg, versions=None, save=None):
 
     # ⑤ 界面里要不要明文显示种子
     _step(5, "界面里要不要明文显示种子？（默认打码）")
-    print("    " + ui.s("打码是为了截图 / 录屏时不把种子漏出去，你自己看的时候也能再按一下显示", "hint"))
-    raw = ask(f"  明文显示？[{'y' if cfg.get('show_seed') else 'N'}]: ", allow_empty=True)
+    print("    " + ui.s(_("打码是为了截图 / 录屏时不把种子漏出去，你自己看的时候也能再按一下显示"), "hint"))
+    raw = ask(f"  {_('明文显示？')}[{'y' if cfg.get('show_seed') else 'N'}]: ", allow_empty=True)
     if (raw or "").strip():
         cfg["show_seed"] = raw.strip().lower().startswith("y")
 
@@ -193,13 +226,13 @@ def run(ask, cfg, versions=None, save=None):
 
     print()
     print(ui.box([
-        ui.s("配好了，就这么用：", "accent"),
+        ui.s(_("配好了，就这么用："), "accent"),
         "",
-        "  " + ui.s("1", "key") + " 计算种子    —— 从下载的存档反推世界种子",
-        "  " + ui.s("2", "key") + " 计算结构    —— 用种子查海底神殿、末地城…",
-        "  " + ui.s("3", "key") + " 设置        —— 上面几项随时能改",
+        "  " + ui.s("1", "key") + " " + _("计算种子    —— 从下载的存档反推世界种子"),
+        "  " + ui.s("2", "key") + " " + _("计算结构    —— 用种子查海底神殿、末地城…"),
+        "  " + ui.s("3", "key") + " " + _("设置        —— 上面几项随时能改"),
         "",
-        ui.s("第一次建议先走一遍 1，算出来的种子会存下来。", "hint"),
-        ui.s("配置在：" + ui.fit(cfgmod.CONFIG_PATH, 48), "hint"),
-    ], title="完成"))
+        ui.s(_("第一次建议先走一遍 1，算出来的种子会存下来。"), "hint"),
+        ui.s(_("配置在：{path}", path=ui.fit(cfgmod.CONFIG_PATH, 48)), "hint"),
+    ], title=_("完成")))
     return cfg

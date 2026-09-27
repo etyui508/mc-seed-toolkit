@@ -18,6 +18,11 @@ import shutil
 import sys
 import unicodedata
 
+import i18n
+
+# 界面自己画的那几句（大标题、进度条文字、默认值提示）也走语言表
+_ = i18n.t
+
 
 # ---------------------------------------------------------------- 环境探测
 def _enable_ansi_windows():
@@ -382,7 +387,7 @@ def bar(frac, width=28):
 
 def ask(prompt, default=None, allow_empty=False):
     """带样式的输入；直接回车用默认值"""
-    tail = s(f" [默认 {default}]", "dim") if default is not None else ""
+    tail = s(f" [{_('默认')} {default}]", "dim") if default is not None else ""
     while True:
         try:
             raw = input(prompt_char() + prompt + tail + " ").strip()
@@ -485,9 +490,9 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
     import time
 
     ch = _chars()
-    title = "MC 种子工具包"
+    title = _("MC 种子工具包")
     right = f"V{version}" if version else ""
-    subtitle = subtitle or "种子计算 · 结构计算 · 坐标查询"
+    subtitle = subtitle or _("种子计算 · 结构计算 · 坐标查询")
     inner = width - 2
     drawn = []                                     # 已经画出来的行，收尾时要擦掉
 
@@ -529,7 +534,7 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
             if _key_waiting():
                 break
             time.sleep(seconds / steps_n)
-        over("  " + bar(1.0, 22) + " 100%  " + s("准备就绪", "ok"))
+        over("  " + bar(1.0, 22) + " 100%  " + s(_("准备就绪"), "ok"))
         sys.stdout.write("\n")
         sys.stdout.flush()
 
@@ -547,8 +552,9 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
                 results.append(None)          # 某一步出错不该拦着启动
             # 画到这一步的完成度（剩下的留给下一步的"开始"）
             frac = i / total
-            over("  " + bar(frac, 22) + f" {int(frac * 100):3d}%  " + s(label + " 完成", "hint"))
-        over("  " + bar(1.0, 22) + " 100%  " + s("准备就绪", "ok"))
+            over("  " + bar(frac, 22) + f" {int(frac * 100):3d}%  "
+                 + s(_("{label} 完成", label=label), "hint"))
+        over("  " + bar(1.0, 22) + " 100%  " + s(_("准备就绪"), "ok"))
         sys.stdout.write("\n")
         sys.stdout.flush()
         return results
@@ -613,7 +619,8 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
         down(back)
 
         # ⑥ 状态行：有活就一边干一边走到底，没活就走一条纯进度条
-        results = run_steps(steps) if steps else (framed_progress(0.4, status or "正在准备"), [])[1]
+        results = (run_steps(steps) if steps
+                   else (framed_progress(0.4, status or _("正在准备")), [])[1])
 
         # ⑦ 收尾：把整块动画擦干净，等下画正式界面
         finish()
@@ -627,8 +634,8 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
 class _Spinner:
     """跑慢活儿的时候转个圈 + 显示已用时间（不是真终端就什么都不画）"""
 
-    def __init__(self, text="正在算"):
-        self.text = text
+    def __init__(self, text=""):
+        self.text = text or _("正在算")
         self._stop = None
         self._thread = None
 
@@ -647,7 +654,7 @@ class _Spinner:
             while not stop.is_set():
                 line = (CLEAR_LINE + "  " + s(self.text, "hint") + "  "
                         + s(frames[i % len(frames)], "accent")
-                        + s(f"  已用 {time.time() - t0:.1f}s", "dim"))
+                        + s("  " + _("已用 {t}s", t=f"{time.time() - t0:.1f}"), "dim"))
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 i += 1
@@ -667,6 +674,6 @@ class _Spinner:
         return False
 
 
-def spinner(text="正在算"):
+def spinner(text=""):
     """用法： with ui.spinner("扫描 2000 格内的结构"): 跑慢命令"""
     return _Spinner(text)

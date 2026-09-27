@@ -19,6 +19,7 @@ ROOT = os.path.dirname(HERE)                               # 工具包根目录
 sys.path.insert(0, HERE)
 import config as cfgmod
 import agreement
+import i18n
 import onboard
 import diag
 import export
@@ -27,6 +28,9 @@ import ui
 import updater
 DEFAULT_OBS = ""
 VERSIONS = mcvers.MILESTONES
+
+# 界面文字都过一遍 i18n；查不到译文就原样显示中文
+_ = i18n.t
 
 
 def load_config():
@@ -43,19 +47,19 @@ def banner(cfg):
         major = cfgmod.check_java(java)
         java_text = f"Java {major}  ({java})" if major else java
     else:
-        java_text = ui.warn("没找到能用的 Java —— 选 1 之前先在【设置】里填，或用 run.sh 启动")
+        java_text = ui.warn(_("没找到能用的 Java —— 选 1 之前先在【设置】里填，或用 run.sh 启动"))
     seed = cfgmod.mask(cfg.get("seed"), cfg.get("show_seed"))
     ch = updater.channel()
     ver_text = updater.local_version()
     if ch != "stable" and not updater.is_prerelease(ver_text):
         ver_text += " " + ch            # 版本号自己带 -beta 时就不用再标一次
     print()
-    print(ui.banner("MC 种子工具包", "从下载的存档破出世界种子，再用种子算结构坐标",
+    print(ui.banner(_("MC 种子工具包"), _("从下载的存档破出世界种子，再用种子算结构坐标"),
                     version=ver_text))
     print(ui.kv([
-        ("种子", ui.s(seed, "val")),
-        ("版本", ui.s(cfg["mc"] or "（还没选）", "val")),
-        ("存档", ui.s(ui.fit(cfg["save"] or "（还没设）", 46), "val")),
+        (_("种子"), ui.s(seed, "val")),
+        (_("版本"), ui.s(cfg["mc"] or _("（还没选）"), "val")),
+        (_("存档"), ui.s(ui.fit(cfg["save"] or _("（还没设）"), 46), "val")),
         ("Java", java_text),
     ], key_width=6, gap=1))
 
@@ -276,9 +280,25 @@ def do_structure(cfg):
 
 def do_settings(cfg):
     print()
-    print(ui.section("设置（直接回车 = 这一项不改）"))
+    print(ui.section(_("设置（直接回车 = 这一项不改）")))
+    # 语言放第一项：改完后面的话立刻就跟着换
+    langs = i18n.available()
+    listing = "   ".join(f"{i}) {name}" for i, (_, name) in enumerate(langs, 1))
+    raw_lang = ask(f"  语言 / Language   {listing}   [{i18n.lang_name(i18n.current())}]: ",
+                   allow_empty=True)
+    raw_lang = (raw_lang or "").strip()
+    picked = None
+    if raw_lang.isdigit() and 1 <= int(raw_lang) <= len(langs):
+        picked = langs[int(raw_lang) - 1][0]
+    elif raw_lang.lower() in [c for c, _ in langs]:
+        picked = raw_lang.lower()
+    if picked and picked != i18n.current():
+        i18n.set_lang(picked)
+        cfg["lang"] = picked
+        save_config(cfg)
+        print("  " + ui.ok(_("语言已切换：{name}", name=i18n.lang_name(picked))))
     print()
-    raw = ask(f"种子 [{cfg['seed'] or '空'}]: ", allow_empty=True)
+    raw = ask(f"{_('种子')} [{cfg['seed'] or _('空')}]: ", allow_empty=True)
     if raw:
         try:
             cfg["seed"] = int(raw)
@@ -384,26 +404,27 @@ def update_panel(man):
     """把"有新版本"这件事摆成一个面板：版本、更新说明、这次改哪些文件"""
     local = updater.local_version()
     ch = updater.channel()
-    lines = [ui.s("当前版本", "dim") + " " + ui.s(local, "val")
-             + "    " + ui.s("新版本", "dim") + " " + ui.s(man.get("version"), "key")
-             + "   " + ui.s(f"（{updater.CHANNEL_NAMES.get(ch, ch)}通道）", "dim"), ""]
+    lines = [ui.s(_("当前版本"), "dim") + " " + ui.s(local, "val")
+             + "    " + ui.s(_("新版本"), "dim") + " " + ui.s(man.get("version"), "key")
+             + "   " + ui.s(_("（{ch}通道）",
+                              ch=_(updater.CHANNEL_NAMES.get(ch, ch))), "dim"), ""]
     if man.get("notes"):
-        lines.append(ui.s("更新说明", "accent"))
+        lines.append(ui.s(_("更新说明"), "accent"))
         for row in str(man["notes"]).splitlines() or [""]:
             lines.append("  " + ui.fit(row, 56))
         lines.append("")
     plan_now = updater.plan(man)
     desc = updater.describe(plan_now, limit=5)
-    lines.append(ui.s("这次会改这些", "accent"))
+    lines.append(ui.s(_("这次会改这些"), "accent"))
     for row in desc:
         lines.append("  " + ui.fit(row, 56))
     lines.append("")
-    lines.append(ui.s("更新时每个文件都会列出改了多少行，完整 diff 存到", "hint"))
-    lines.append(ui.s("记录/更新日志/。你的种子、坐标记录、自带 Java 都不会被动。", "hint"))
+    lines.append(ui.s(_("更新时每个文件都会列出改了多少行，完整 diff 存到"), "hint"))
+    lines.append(ui.s(_("记录/更新日志/。你的种子、坐标记录、自带 Java 都不会被动。"), "hint"))
     if man.get("url_backup"):
-        lines.append(ui.s("下载走主站（GitHub），连不上自动换备用站。", "hint"))
+        lines.append(ui.s(_("下载走主站（GitHub），连不上自动换备用站。"), "hint"))
     print()
-    print(ui.box(lines, title="发现新版本"))
+    print(ui.box(lines, title=_("发现新版本")))
 
 
 def do_update():
@@ -553,6 +574,8 @@ def do_feedback():
 
 def main():
     cfg = load_config()
+    # 语言：配置里存的优先；第一次用还没存过就按系统区域猜一个
+    i18n.set_lang(cfg.get("lang") or i18n.guess_from_system())
     first = cfg.get("seed") is None
     diag.install_excepthook()
     diag.log("启动", 版本=updater.local_version(), 有种子=("有" if cfg.get("seed") else "无"),
@@ -561,8 +584,8 @@ def main():
     # 所以条子会真的走到底，走完主菜单立刻就出来。
     need_check = (os.environ.get("MC_NO_UPDATE") != "1"
                   and not updater.auto_update_enabled())
-    results = ui.intro(version=updater.local_version(), status="正在准备…",
-                       steps=[("联网检查更新", updater.check)] if need_check else None)
+    results = ui.intro(version=updater.local_version(), status=_("正在准备…"),
+                       steps=[(_("联网检查更新"), updater.check)] if need_check else None)
     if need_check:
         man, msg = (results[0] if results and results[0] else (None, ""))
         startup_update(man, msg)
@@ -573,13 +596,13 @@ def main():
     if agreement.needs_accept(cfg):
         if not agreement.show(ask):
             print()
-            print(ui.warn("那就不往下走了。想再看一遍就重新运行一次。"))
+            print(ui.warn(_("那就不往下走了。想再看一遍就重新运行一次。")))
             diag.log("没同意用户协议，退出")
             return
         agreement.mark_agreed(cfg)
         save_config(cfg)
         diag.log("同意用户协议", 版本=agreement.AGREEMENT_VERSION)
-        print("  " + ui.ok("记下了，以后不再问。"))
+        print("  " + ui.ok(_("记下了，以后不再问。")))
 
     # 第一次用（或者引导改版了）：把版本/存档/Java/更新通道一次问清楚。
     # 包里默认不带配置文件 —— 该配什么、存在哪儿，全由用户自己来。
@@ -591,7 +614,7 @@ def main():
         onboard.run(ask, cfg, versions=vs, save=save_config)
         diag.log("走完首次引导", 版本=cfg.get("mc") or "未选",
                  通道=cfg.get("channel"), 有Java=("有" if cfg.get("java") else "无"))
-        print("  " + ui.ok("引导完成，以后启动直接就进主菜单"))
+        print("  " + ui.ok(_("引导完成，以后启动直接就进主菜单")))
     elif onboard.backfill(cfg, save_config):
         diag.log("老配置：补记引导标记")      # 用过一阵子的老用户，不弹问题
     try:
@@ -599,25 +622,25 @@ def main():
             banner(cfg)
             if first:
                 print()
-                print("  " + ui.warn("第一次用建议先选 1【计算种子】—— 算出来的种子会存下来，")
-                      + "\n  " + ui.warn("之后结构计算器直接就能用。"))
+                print("  " + ui.warn(_("第一次用建议先选 1【计算种子】—— 算出来的种子会存下来，"))
+                      + "\n  " + ui.warn(_("之后结构计算器直接就能用。")))
             print()
-            print(ui.menu("主菜单", [
-                ("1", "计算种子", "从下载的存档反推世界种子"),
-                ("2", "计算结构 / 坐标", "用种子查海底神殿、末地城…"),
-                ("3", "设置", "种子 / 版本 / 路径 / Java"),
-                ("4", "检查更新", "联网看有没有新版本"),
-                ("5", "反馈问题", "带上日志一键发给作者"),
-                ("6", "用户协议 / 隐私政策", "什么时候都不上传什么"),
-                ("7", "导出 / 复制结果", "剪贴板 / txt / json / mcfunction"),
-                ("8", "回滚到旧版本", "更新出问题了就倒回去"),
-                ("0", "退出", ""),
-            ], footer="直接回车 = 退出"))
+            print(ui.menu(_("主菜单"), [
+                ("1", _("计算种子"), _("从下载的存档反推世界种子")),
+                ("2", _("计算结构 / 坐标"), _("用种子查海底神殿、末地城…")),
+                ("3", _("设置"), _("种子 / 版本 / 路径 / Java")),
+                ("4", _("检查更新"), _("联网看有没有新版本")),
+                ("5", _("反馈问题"), _("带上日志一键发给作者")),
+                ("6", _("用户协议 / 隐私政策"), _("什么时候都不上传什么")),
+                ("7", _("导出 / 复制结果"), _("剪贴板 / txt / json / mcfunction")),
+                ("8", _("回滚到旧版本"), _("更新出问题了就倒回去")),
+                ("0", _("退出"), ""),
+            ], footer=_("直接回车 = 退出")))
             print()
-            choice = ask("选一个: ", allow_empty=True)
+            choice = ask(_("选一个: "), allow_empty=True)
             diag.log("菜单选择", 选择=choice)
             if choice in ("0", "", "q", "exit"):
-                print("\n" + ui.ok("再见~"))
+                print("\n" + ui.ok(_("再见~")))
                 diag.log("退出")
                 return
             if choice == "1":

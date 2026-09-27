@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""界面文字的多语言。
+
+怎么用：
+
+    import i18n
+    print(i18n.t("正在计算种子…"))
+    print(i18n.t("已更新到 {ver}", ver="1.16.0"))
+
+设计上刻意"以中文原文为 key"：
+  · 没翻译到的地方原样显示中文，不会崩、不会显示成空白；
+  · 加新语言只要往 app/lang/ 里丢一个 json，不用改代码；
+  · 代码里读起来还是中文，改文案的时候一眼就能对上。
+
+语言文件放在 app/lang/<代码>.json，内容就是 {"中文原文": "译文"}。
+"""
+import json
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LANG_DIR = os.path.join(HERE, "lang")
+
+# 语言代码 -> 用它自己的语言写的名字（选语言那一步显示这个）
+LANGS = {
+    "zh": "中文",
+    "en": "English",
+}
+DEFAULT = "zh"
+
+_lang = DEFAULT
+_table = {}
+
+
+def available():
+    """有哪些语言：[(代码, 名字), ...]"""
+    return [(code, name) for code, name in LANGS.items()]
+
+
+def lang_name(code):
+    return LANGS.get((code or "").lower(), code or DEFAULT)
+
+
+def current():
+    return _lang
+
+
+def _load(code):
+    path = os.path.join(LANG_DIR, f"{code}.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {k: v for k, v in data.items() if isinstance(v, str) and v}
+    except Exception:
+        return {}
+
+
+def set_lang(code):
+    """切语言。未知代码当作默认（中文）。"""
+    global _lang, _table
+    code = str(code or "").strip().lower()
+    if code not in LANGS:
+        code = DEFAULT
+    _lang = code
+    _table = {} if code == DEFAULT else _load(code)
+    return _lang
+
+
+def guess_from_system():
+    """从系统区域猜一个默认语言：认识中文就中文，否则英文。
+
+    只在"配置里还没存过语言"的时候用（首次启动的默认选项）。
+    """
+    for key in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        value = os.environ.get(key)
+        if value:
+            v = value.lower()
+            if "zh" in v or "chinese" in v:
+                return "zh"
+            if v and not v.startswith(("c.", "posix")):
+                return "en"
+    if os.name == "nt":                     # Windows：问一下系统界面语言
+        try:
+            import ctypes
+            code = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+            return "zh" if (code & 0x3FF) == 0x04 else "en"
+        except Exception:
+            pass
+    return DEFAULT
+
+
+def t(text, **kw):
+    """翻译一句；查不到就原样返回。
+
+    kw 用来填 {占位符}。译文里的占位符跟中文对不上时不会炸，退回中文。
+    """
+    s = text
+    if _lang != DEFAULT and _table:
+        s = _table.get(text, text)
+    if kw:
+        try:
+            s = s.format(**kw)
+        except Exception:
+            try:
+                s = str(text).format(**kw)
+            except Exception:
+                s = text
+    return s

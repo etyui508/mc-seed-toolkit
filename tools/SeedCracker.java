@@ -748,7 +748,14 @@ public final class SeedCracker {
      *  maxBad=0 就是严格模式（原来那样）。放宽是安全的：最后有 sha256 哈希兜底，不会解错，
      *  只是多留几个候选 —— 用来对付"观测文件里混进了别的世界/手滑记错的几条"。 */
     static List<long[]> crack(int value, List<Constraint> constraints, int maxBad) {
-        List<long[]> results = Collections.synchronizedList(new ArrayList<>());
+        // 按"对上的条数"分桶，全对的排前面。
+        // 以前是"先遇到的先收，收满 20 万就停"，放宽到允许错 2 条以后候选有几千万个，
+        // 真种子很可能排在第 20 万个之外被丢掉 —— 于是哈希那一步白跑几分钟还报"对不上"。
+        final int buckets = Math.max(1, maxBad + 1);
+        List<List<long[]>> byBad = new ArrayList<>();
+        for (int i = 0; i < buckets; i++) {
+            byBad.add(Collections.synchronizedList(new ArrayList<>()));
+        }
         java.util.concurrent.atomic.LongAdder total = new java.util.concurrent.atomic.LongAdder();
         java.util.concurrent.atomic.AtomicLong done = new java.util.concurrent.atomic.AtomicLong();
         IntStream.range(0, 1 << 16).parallel().forEach(high -> {
@@ -767,14 +774,33 @@ public final class SeedCracker {
                 }
                 if (bad <= maxBad) {
                     total.increment();
-                    if (results.size() < CANDIDATE_CAP) {
-                        results.add(new long[]{seed});
+                    List<long[]> bucket = byBad.get(bad);
+                    synchronized (bucket) {
+                        if (bucket.size() < CANDIDATE_CAP) {
+                            bucket.add(new long[]{seed});
+                        }
                     }
                 }
             }
         });
+        List<long[]> results = new ArrayList<>();
+        StringBuilder shape = new StringBuilder();
+        for (int i = 0; i < buckets; i++) {
+            List<long[]> bucket = byBad.get(i);
+            shape.append(i == 0 ? "全对 " : ("错 " + i + " 条 ")).append(bucket.size()).append(" 个");
+            if (i + 1 < buckets) {
+                shape.append("，");
+            }
+            for (long[] c : bucket) {
+                if (results.size() >= CANDIDATE_CAP) {
+                    break;
+                }
+                results.add(c);
+            }
+        }
+        System.out.printf("（候选分档：%s）%n", shape);
         if (total.sum() > CANDIDATE_CAP) {
-            System.out.printf("（候选共 %d 个，只保留前 %d 个用来定高 16 位；加更多观测会更快）%n",
+            System.out.printf("（候选共 %d 个，按「对得多的优先」取前 %d 个去定高 16 位；加更多观测会更快）%n",
                     total.sum(), CANDIDATE_CAP);
         }
         return results;
@@ -923,13 +949,20 @@ public final class SeedCracker {
         final long hashedSeedValue = hashed;
         List<Long> full = java.util.Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.atomic.AtomicLong hashDone = new java.util.concurrent.atomic.AtomicLong();
+        // 候选是按"对得多的优先"排好的，真种子通常在前几条里 —— 一旦有一条的 sha256 对上了，
+        // 那就没有别的可能了（哈希撞车不可能），直接收工。以前是 200000×65536 次哈希全跑完。
+        java.util.concurrent.atomic.AtomicBoolean hit = new java.util.concurrent.atomic.AtomicBoolean();
         candidates.parallelStream().forEach(c -> {
+            if (hit.get()) {
+                return;
+            }
             progress("hash", hashDone.incrementAndGet(), candidates.size());
             long[] resolved = resolveHighBits(c[0], hashedSeedValue);
-            if (resolved != null) {
+            if (resolved != null && hit.compareAndSet(false, true)) {
                 full.add(resolved[0]);
             }
         });
+        progress("hash", candidates.size(), candidates.size());
         System.out.printf("耗时 %d ms%n", System.currentTimeMillis() - t1);
         if (full.isEmpty()) {
             System.out.println("低 48 位候选里没有一个能对上哈希 —— 说明约束里有错数据（史莱姆区块容易记错）");

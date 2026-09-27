@@ -1,0 +1,31 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+issueTrackerURL="https://github.com/etyui508/seedhelper/issues"
+
+[[mods]]
+modId="seedhelper"
+version="1.1.0"
+displayName="SeedHelper 观测记录"
+authors="etyui"
+description='''
+自动记录破种子需要的观测数据：客户端哈希种子、末地 10 根柱子顶面、看到史莱姆的区块、群系采样。
+写进 .minecraft/seedhelper-observations.txt，配合 MC 种子工具包反推世界种子。
+纯客户端，不装到服务器上。
+'''
+# 纯客户端 mod：设成忽略版本对比，免得进服务器时被"Forge 认为服务器少了个 mod"拦下来
+displayTest="IGNORE_ALL_VERSION"
+
+[[dependencies.seedhelper]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.seedhelper]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.20.2)"
+    ordering="NONE"
+    side="CLIENT"

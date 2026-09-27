@@ -477,6 +477,25 @@ def test_updater_sources():
                 os.environ[k] = v
 
 
+def test_i18n():
+    section("界面多语言（中英文）")
+    import i18n
+
+    check("默认是中文", i18n.set_lang("zh") == "zh" and i18n.t("主菜单") == "主菜单")
+    check("英文字典能加载", i18n.set_lang("en") == "en" and i18n.t("主菜单") == "Main menu")
+    check("没翻过的原样返回中文", i18n.t("这句话还没翻译") == "这句话还没翻译")
+    check("占位符会替换", i18n.t("配置在：{path}", path="/tmp/a") == "Config file: /tmp/a")
+    check("认不出的语言代码回落到中文", i18n.set_lang("klingon") == "zh")
+    check("中文下不查表（原样输出）", i18n.t("退出") == "退出")
+    table = json.load(open(os.path.join(APP, "lang", "en.json"), encoding="utf-8"))
+    check("英文表里没有空译文", all(isinstance(v, str) and v.strip() for v in table.values()))
+    check("系统语言猜测结果合法", i18n.guess_from_system() in ("zh", "en"))
+    # 代码里用到的 key 必须在表里有译文，不然就是漏翻了（只抽查菜单这几条）
+    for key in ("主菜单", "计算种子", "设置", "检查更新", "退出"):
+        check(f"菜单有译文：{key}", key in table)
+    i18n.set_lang("zh")
+
+
 def test_onboard():
     section("首次启动引导（包里默认不带配置文件）")
     from unittest import mock
@@ -511,11 +530,16 @@ def test_onboard():
     check("一路回车：明文显示种子默认关", cfg["show_seed"] is False)
     check("记下了「走过引导」", str(cfg["onboarded"]).startswith("1:"), str(cfg["onboarded"]))
 
-    cfg2 = quiet(["n"], cfgmod.DEFAULTS)
+    cfg_en = quiet(["2"], cfgmod.DEFAULTS)
+    check("第一件事就是问语言：选 2 得到英文", cfg_en.get("lang") == "en", str(cfg_en.get("lang")))
+    import i18n
+    i18n.set_lang("zh")                          # 别把语言带进后面的测试
+
+    cfg2 = quiet(["", "n"], cfgmod.DEFAULTS)        # 第一个回车 = 语言默认
     check("开头说不配就跳过（不硬缠着用户）",
           cfg2["onboarded"] == "1:skipped" and cfg2["mc"] is None, str(cfg2["onboarded"]))
 
-    cfg3 = quiet(["y", "2", "/tmp/不存在的存档", "/usr/bin/java", "2", "y"], cfgmod.DEFAULTS)
+    cfg3 = quiet(["", "y", "2", "/tmp/不存在的存档", "/usr/bin/java", "2", "y"], cfgmod.DEFAULTS)
     check("输编号选版本", cfg3["mc"] == "1.21.10", str(cfg3["mc"]))
     check("存档路径记下来了（不存在也不拦着）", cfg3["save"] == "/tmp/不存在的存档")
     check("能切到测试版通道", cfg3["channel"] == "beta")
@@ -540,6 +564,7 @@ def test_onboard():
          mock.patch.dict(os.environ, {"MC_NO_ONBOARD": "1"}):
         check("MC_NO_ONBOARD=1 能关掉", not onboard.needed({}))
     check("配置文件默认值里有 onboarded 这一项", "onboarded" in cfgmod.DEFAULTS)
+    check("配置文件默认值里有 lang 这一项（不然存不下去）", "lang" in cfgmod.DEFAULTS)
     check("配置文件里没种子（出厂状态干净）", cfgmod.DEFAULTS.get("seed") is None)
 
 
@@ -634,6 +659,7 @@ def main():
     test_updater_apply()
     test_updater_plan()
     test_updater_sources()
+    test_i18n()
     test_onboard()
     test_export()
     test_terminal_width()
