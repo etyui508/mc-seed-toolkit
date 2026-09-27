@@ -135,10 +135,10 @@ def print_version_list(vs, local=True, columns=4):
     lines = version_list_text(vs, local, columns)
     if not lines:
         return
-    print("  " + ui.info(f"这 {len(vs)} 个版本包里都带现成模组，输编号选："))
+    print("  " + ui.info(_("这 {n} 个版本包里都带现成模组，输编号选：", n=len(vs))))
     if not local:
-        print("  " + ui.warn("（本地 mods/ 里没找到版本文件夹 —— 这份列表是内置的；"
-                             "模组可能没下全，去 记录/日志.txt 看看）"))
+        print("  " + ui.warn(_("（本地 mods/ 里没找到版本文件夹 —— 这份列表是内置的；"
+                              "模组可能没下全，去 记录/日志.txt 看看）")))
     for line in lines:
         print(line)
 
@@ -303,64 +303,65 @@ def do_settings(cfg):
         try:
             cfg["seed"] = int(raw)
         except ValueError:
-            print("  " + ui.warn("种子必须是整数，忽略"))
+            print("  " + ui.warn(_("种子必须是整数，忽略")))
     # 支持哪些版本直接摆出来 —— 不然"输编号选"这四个字等于没说
     vs, local = supported_versions()
     print()
     if vs:
-        print("  " + ui.s("支持的游戏版本（模组现成）", "accent")
-              + ui.s(f"    现在选的是 {cfg['mc'] or '空'}", "hint"))
+        print("  " + ui.s(_("支持的游戏版本（模组现成）"), "accent")
+              + ui.s("    " + _("现在选的是 {v}", v=cfg['mc'] or _("空")), "hint"))
         print_version_list(vs, local)
     else:
-        print("  " + ui.warn("本地 mods/ 里没找到版本文件夹 —— 手输版本号也行"))
+        print("  " + ui.warn(_("本地 mods/ 里没找到版本文件夹 —— 手输版本号也行")))
     print()
-    raw = ask(f"版本（回车不改 / 输编号选上面的 / 也能直接输版本号）[{cfg['mc'] or '空'}]: ",
-              allow_empty=True)
+    raw = ask(f"{_('版本（回车不改 / 输编号选上面的 / 也能直接输版本号）')}"
+              f"[{cfg['mc'] or _('空')}]: ", allow_empty=True)
     if raw:
         if raw.isdigit() and vs and 1 <= int(raw) <= len(vs):
             cfg["mc"] = vs[int(raw) - 1]
-            print("  " + ui.ok(f"选的是 {cfg['mc']}（模组在 mods/{cfg['mc']}/ 里现成的）"))
+            print("  " + ui.ok(_("选的是 {v}（模组在 mods/{v}/ 里现成的）", v=cfg['mc'])))
         else:
             cfg["mc"] = raw
             if vs and raw not in vs:
-                print("  " + ui.warn(f"{raw} 我们没准备模组 —— 要用得自己编"
-                                    f"（tools/build-mods.py --only-seedhelper {raw}）"))
+                print("  " + ui.warn(_("{v} 我们没准备模组 —— 要用得自己编", v=raw))
+                      + f"（tools/build-mods.py --only-seedhelper {raw}）")
             else:
-                print("  " + ui.ok(f"版本记成 {cfg['mc']}"))
-    raw = ask(f"存档目录 [{cfg['save'] or '空'}]: ", allow_empty=True)
+                print("  " + ui.ok(_("版本记成 {v}", v=cfg['mc'])))
+    raw = ask(f"{_('存档目录')} [{cfg['save'] or _('空')}]: ", allow_empty=True)
     if raw:
         cfg["save"] = raw
-    raw = ask(f"模组观测文件 [{cfg['obs'] or '空'}]: ", allow_empty=True)
+    raw = ask(f"{_('模组观测文件')} [{cfg['obs'] or _('空')}]: ", allow_empty=True)
     if raw:
         cfg["obs"] = raw
-    cur_java = cfg.get("java") or cfgmod.find_java() or "没找到"
-    raw = ask(f"Java 路径（跑破解/查结构要用）[{cur_java}]: ", allow_empty=True)
+    cur_java = cfg.get("java") or cfgmod.find_java() or _("没找到")
+    raw = ask(f"{_('Java 路径（跑破解/查结构要用）')}[{cur_java}]: ", allow_empty=True)
     if raw:
         cfg["java"] = cfgmod.adapt_path(raw)
         major = cfgmod.check_java(cfg["java"])
         if major:
-            print("  " + ui.ok(f"这个 Java 能跑（Java {major}）"))
+            print("  " + ui.ok(_("这个 Java 能跑（Java {major}）", major=major)))
         else:
-            print("  " + ui.err("这个 java 跑不起来（路径不对 / 版本太老 / 不是本系统的版本）"))
+            print("  " + ui.err(_("这个 java 跑不起来（路径不对 / 版本太老 / 不是本系统的版本）")))
             print("    " + cfgmod.java_hint().replace("\n", "\n    "))
             cfg["java"] = None
-    raw = ask(f"界面里显示完整种子? 现在={'是' if cfg.get('show_seed') else '否'} [y/N]: ", allow_empty=True)
+    raw = ask(_("界面里显示完整种子？现在={now}", now=_(("是" if cfg.get("show_seed") else "否")))
+              + " [y/N]: ", allow_empty=True)
     if raw:
         cfg["show_seed"] = raw.lower().startswith("y")
     cur = updater.channel()
-    raw = ask(f"更新通道 1) 稳定版  2) 测试版 [现在={updater.CHANNEL_NAMES.get(cur, cur)}]: ",
-              allow_empty=True)
+    raw = ask(f"{_('更新通道')} 1) {_('稳定版')}  2) {_('测试版')} "
+              f"[{_('当前')}={_(updater.CHANNEL_NAMES.get(cur, cur))}]: ", allow_empty=True)
     if raw:
         if raw.strip() in ("2", "beta", "测试版", "测试"):
             cfg["channel"] = "beta"
-            print("  " + ui.warn("已切成测试版 —— 新功能会先给你，但也可能遇到半成品，"
-                                 "出问题用主菜单 5 反馈"))
+            print("  " + ui.warn(_("已切成测试版 —— 新功能会先给你，但也可能遇到半成品，"
+                                   "出问题用主菜单 5 反馈")))
         else:
             cfg["channel"] = "stable"
-            print("  " + ui.ok("已切回稳定版"))
+            print("  " + ui.ok(_("已切回稳定版")))
     save_config(cfg)
-    print(ui.ok("已保存到 " + cfgmod.CONFIG_PATH))
-    print("  " + ui.info("界面上要显示完整种子的话，下一项答 y"))
+    print(ui.ok(_("已保存到 {path}", path=cfgmod.CONFIG_PATH)))
+    print("  " + ui.info(_("界面上要显示完整种子的话，下一项答 y")))
 
 
 def startup_update(man=None, msg=""):

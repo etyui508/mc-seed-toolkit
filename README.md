@@ -58,6 +58,16 @@ saved for the structure calculators.
 
 The seed search is fully local. No server access, no OP, no external service.
 
+## Ore density — which chunk is the richest
+
+Main menu → `2` → `31` counts the ores inside a save you have **already downloaded** and
+ranks the chunks by how many you'd find in each one. Diamonds count their deepslate
+variant too, and you can limit it to a depth range (e.g. `-64 -16`). The Nether and End are
+scanned separately when their folders are present.
+
+It counts real blocks rather than predicting them, so it is exact — but it only covers the
+chunks you actually downloaded. Fly the downloader over the area you care about first.
+
 ## Two mods you install on your client
 
 Both are client-side; the server never sees them.
@@ -101,7 +111,7 @@ python3 tools/tests/test_reject.py     # 22 tamper-resistance checks
 | Path | Contents |
 | --- | --- |
 | `app/` | the toolkit itself (`tool.py` is the entry point) |
-| `app/structures/` | one module per structure (33 of them) |
+| `app/structures/` | one module per structure or tool (31 registry entries) |
 | `app/lang/` | UI translations (`en.json`, …) |
 | `mods/` | ready-made client mods for 21 Minecraft versions |
 | `mod-src/` | SeedHelper source (Fabric, intermediary names) |

@@ -32,9 +32,10 @@ from . import biome_at
 from . import biome_find
 from . import slime
 from . import scan_block
+from . import ore_density
 
 
-# 全部结构，按菜单编号排序（编号唯一，1~30）
+# 全部结构，按菜单编号排序（编号唯一，1~31）
 ALL = sorted([m.STRUCT for m in (
     stronghold,
     ocean_monument,
@@ -66,6 +67,7 @@ ALL = sorted([m.STRUCT for m in (
     biome_find,
     slime,
     scan_block,
+    ore_density,
 )], key=lambda s: s.no)
 
 BY_NO = {s.no: s for s in ALL}

@@ -22,8 +22,12 @@ sys.path.insert(0, HERE)
 
 import config as cfgmod
 import engine
+import i18n
 import state
 import ui
+
+# 界面文字走语言表；查不到就原样显示中文
+_ = i18n.t
 from structures import ALL, by_no
 from structures import biome_at, biome_find, end_city_clean, end_ship, end_ship_scan
 from structures import overview, probe, scan_block, slime, stronghold
@@ -108,7 +112,7 @@ def menu():
     structs, specials = grouped()
     grid, row = [], []
     for st in structs:
-        cell = ui.s(f"{st.no:>2}", "key") + " " + st.name
+        cell = ui.s(f"{st.no:>2}", "key") + " " + _(st.name)
         row.append(ui.pad(cell, 20))
         if len(row) == 3:
             grid.append("".join(row).rstrip())
@@ -116,14 +120,15 @@ def menu():
     if row:
         grid.append("".join(row).rstrip())
     print()
-    print(ui.box(grid, title=f"原版结构 {structs[0].no}~{structs[-1].no}  （直接输编号查询）"))
+    print(ui.box(grid, title=_("原版结构 {a}~{b}  （直接输编号查询）",
+                               a=structs[0].no, b=structs[-1].no)))
 
     # ---- 特殊功能 ----
-    print(ui.menu(f"特殊功能 {specials[0].no}~{specials[-1].no}",
-                  [(str(st.no), st.name, st.hint) for st in specials],
-                  footer="0 = 返回主菜单   （结果都会存到 记录/坐标记录.txt）"))
+    print(ui.menu(_("特殊功能 {a}~{b}", a=specials[0].no, b=specials[-1].no),
+                  [(str(st.no), _(st.name), _(st.hint)) for st in specials],
+                  footer=_("0 = 返回主菜单   （结果都会存到 记录/坐标记录.txt）")))
     print()
-    choice = input(ui.prompt_char() + "选一个: ").strip()
+    choice = input(ui.prompt_char() + _("选一个: ")).strip()
     if choice == "0" or not choice:
         return False
 

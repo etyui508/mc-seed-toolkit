@@ -102,6 +102,18 @@ def test_registry():
           f"{len(funcs)} 个自定义")
     check("命令行入口都在", all(callable(s.cli) for s in structures.ALL if s.cli))
 
+    # 矿石分布：数的是下载好的存档，跟种子无关，所以单独确认它的数据是自洽的
+    from structures import ore_density as ore
+    ids = [bid for _label, blocks in ore.ORES for bid in blocks]
+    check("矿石表里都是 minecraft: 开头的 id", all(i.startswith("minecraft:") for i in ids),
+          f"{len(ids)} 个方块")
+    check("矿石表里有钻石和远古残骸",
+          any("diamond" in i for i in ids) and any("ancient_debris" in i for i in ids))
+    check("钻石会连深层变种一起数",
+          any("deepslate_diamond" in i for i in ids))
+    check("矿石分布排在菜单第 31 项", structures.by_no(31) is not None
+          and structures.by_no(31).name == "矿石分布")
+
 
 # ---------------------------------------------------------------- 界面
 def test_ui():
