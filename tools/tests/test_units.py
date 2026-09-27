@@ -477,6 +477,72 @@ def test_updater_sources():
                 os.environ[k] = v
 
 
+def test_onboard():
+    section("首次启动引导（包里默认不带配置文件）")
+    from unittest import mock
+    import config as cfgmod
+    import onboard
+
+    def feeder(answers):
+        it = iter(list(answers) + [""] * 20)      # 不够就回车（等于用默认值）
+
+        def ask(prompt, default=None, allow_empty=False):
+            raw = str(next(it)).strip()
+            if raw:
+                return raw
+            return default if default is not None else ("" if allow_empty else None)
+
+        return ask
+
+    vs = ["1.16.5", "1.21.10", "1.21.11"]
+    import contextlib
+    import io
+
+    def quiet(answers, base):
+        """跑一遍引导，但不把界面刷到测试输出里"""
+        target = dict(base)
+        with contextlib.redirect_stdout(io.StringIO()):
+            onboard.run(feeder(answers), target, versions=vs)
+        return target
+
+    cfg = quiet([], cfgmod.DEFAULTS)
+    check("一路回车：版本取列表里最新的", cfg["mc"] == "1.21.11", str(cfg["mc"]))
+    check("一路回车：通道还是稳定版", cfg["channel"] == "stable")
+    check("一路回车：明文显示种子默认关", cfg["show_seed"] is False)
+    check("记下了「走过引导」", str(cfg["onboarded"]).startswith("1:"), str(cfg["onboarded"]))
+
+    cfg2 = quiet(["n"], cfgmod.DEFAULTS)
+    check("开头说不配就跳过（不硬缠着用户）",
+          cfg2["onboarded"] == "1:skipped" and cfg2["mc"] is None, str(cfg2["onboarded"]))
+
+    cfg3 = quiet(["y", "2", "/tmp/不存在的存档", "/usr/bin/java", "2", "y"], cfgmod.DEFAULTS)
+    check("输编号选版本", cfg3["mc"] == "1.21.10", str(cfg3["mc"]))
+    check("存档路径记下来了（不存在也不拦着）", cfg3["save"] == "/tmp/不存在的存档")
+    check("能切到测试版通道", cfg3["channel"] == "beta")
+    check("能打开明文显示", cfg3["show_seed"] is True)
+    check("路径会做平台适配（不炸）", isinstance(cfg3["save"], str))
+
+    class _Tty:
+        def isatty(self):
+            return True
+
+    with mock.patch.object(onboard.sys, "stdin", _Tty()):
+        check("走过了就不再问", not onboard.needed({"onboarded": "1:2026-09-27 19:00"}))
+        check("没走过就问", onboard.needed({}))
+        check("引导改版了会再问一遍", onboard.needed({"onboarded": "0:老版本"}))
+        check("老用户（已经配过版本/种子）不弹引导",
+              not onboard.needed({"mc": "1.21.10", "seed": 123}))
+        old = {"mc": "1.21.10", "seed": 123}
+        check("老用户只静默补个标记",
+              onboard.backfill(old) and old["onboarded"] == "1:existing")
+        check("补过标记的不会再补", not onboard.backfill(old))
+    with mock.patch.object(onboard.sys, "stdin", _Tty()), \
+         mock.patch.dict(os.environ, {"MC_NO_ONBOARD": "1"}):
+        check("MC_NO_ONBOARD=1 能关掉", not onboard.needed({}))
+    check("配置文件默认值里有 onboarded 这一项", "onboarded" in cfgmod.DEFAULTS)
+    check("配置文件里没种子（出厂状态干净）", cfgmod.DEFAULTS.get("seed") is None)
+
+
 # ---------------------------------------------------------------- 打包 / 配置
 def test_export():
     section("结果导出（剪贴板 / txt / json / mcfunction）")
@@ -568,6 +634,7 @@ def main():
     test_updater_apply()
     test_updater_plan()
     test_updater_sources()
+    test_onboard()
     test_export()
     test_terminal_width()
     test_packaging()

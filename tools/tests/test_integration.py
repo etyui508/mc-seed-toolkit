@@ -53,9 +53,11 @@ def sandbox():
     return tmp
 
 
-def run(box, args, stdin=None, timeout=300):
+def run(box, args, stdin=None, timeout=300, env_extra=None):
     env = dict(os.environ, MC_NO_UPDATE="1", MCVER=VER,
                PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    if env_extra:
+        env.update(env_extra)
     t0 = time.time()
     try:
         p = subprocess.run([sys.executable] + args, cwd=box, input=stdin,
@@ -124,6 +126,29 @@ def main():
         for entry, name, keys, want in menus:
             out, rc, dt = run(box, [entry], stdin=keys, timeout=300)
             check(name, want in out and "Traceback" not in out, f"{dt:.1f}s")
+
+        # 第一次用：沙箱里造一份"没有配置文件"的包，看引导会不会自己跑起来
+        print("\n③b 首次启动引导（包里不带配置文件）")
+        fresh = sandbox()
+        try:
+            os.remove(os.path.join(fresh, ".mc-tool.json"))
+            env_extra = {"MC_ONBOARD": "1"}          # 管道里不是真终端，这里强制走一遍
+            keys = "y\n\n\n\n\n\n0\n"                # 一路回车 + 最后退到主菜单选 0
+            out, rc, dt = run(fresh, ["app/tool.py"], stdin=keys, timeout=300, env_extra=env_extra)
+            check("引导真的跑起来了", "欢迎用 MC 种子工具包" in out and "配好了" in out, f"{dt:.1f}s")
+            cfg_path = os.path.join(fresh, ".mc-tool.json")
+            check("配置是引导的时候现写的", os.path.isfile(cfg_path))
+            made = json.load(open(cfg_path, encoding="utf-8"))
+            check("引导完记了 onboarded 标记", str(made.get("onboarded", "")).startswith("1:"),
+                  str(made.get("onboarded")))
+            check("版本也配好了", bool(made.get("mc")), str(made.get("mc")))
+            check("种子还是空的（出厂状态不塞种子）", made.get("seed") is None)
+            # 第二次启动就不该再问一遍了
+            out2, _rc2, _dt2 = run(fresh, ["app/tool.py"], stdin="0\n", timeout=300,
+                                   env_extra=env_extra)
+            check("第二次启动不再走引导", "欢迎用 MC 种子工具包" not in out2)
+        finally:
+            shutil.rmtree(fresh, ignore_errors=True)
 
         if FULL:
             print("\n④ 慢的（--full 才跑）")

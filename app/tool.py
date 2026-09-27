@@ -19,6 +19,7 @@ ROOT = os.path.dirname(HERE)                               # 工具包根目录
 sys.path.insert(0, HERE)
 import config as cfgmod
 import agreement
+import onboard
 import diag
 import export
 import mcvers
@@ -543,6 +544,20 @@ def main():
         save_config(cfg)
         diag.log("同意用户协议", 版本=agreement.AGREEMENT_VERSION)
         print("  " + ui.ok("记下了，以后不再问。"))
+
+    # 第一次用（或者引导改版了）：把版本/存档/Java/更新通道一次问清楚。
+    # 包里默认不带配置文件 —— 该配什么、存在哪儿，全由用户自己来。
+    if onboard.needed(cfg):
+        try:
+            vs, _local = supported_versions()
+        except Exception:
+            vs = []
+        onboard.run(ask, cfg, versions=vs, save=save_config)
+        diag.log("走完首次引导", 版本=cfg.get("mc") or "未选",
+                 通道=cfg.get("channel"), 有Java=("有" if cfg.get("java") else "无"))
+        print("  " + ui.ok("引导完成，以后启动直接就进主菜单"))
+    elif onboard.backfill(cfg, save_config):
+        diag.log("老配置：补记引导标记")      # 用过一阵子的老用户，不弹问题
     try:
         while True:
             banner(cfg)
