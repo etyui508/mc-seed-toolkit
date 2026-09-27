@@ -109,19 +109,43 @@ def supported_versions():
     return sorted(out, key=key), True
 
 
+def version_list_text(vs, local=True, columns=4):
+    """把支持的版本摆成一个带编号的列表（编号就是"输这个数字就选它"）"""
+    if not vs:
+        return []
+    lines = []
+    row = []
+    for i, v in enumerate(vs, 1):
+        cell = ui.s(f"{i:2d}", "key") + " " + pad_name(v, 10)
+        row.append(cell)
+        if i % columns == 0:
+            lines.append("  " + "".join(row))
+            row = []
+    if row:
+        lines.append("  " + "".join(row))
+    return lines
+
+
+def print_version_list(vs, local=True, columns=4):
+    """把"我们准备好模组的版本"打出来，顺便说明编号怎么用"""
+    lines = version_list_text(vs, local, columns)
+    if not lines:
+        return
+    print("  " + ui.info(f"这 {len(vs)} 个版本包里都带现成模组，输编号选："))
+    if not local:
+        print("  " + ui.warn("（本地 mods/ 里没找到版本文件夹 —— 这份列表是内置的；"
+                             "模组可能没下全，去 记录/日志.txt 看看）"))
+    for line in lines:
+        print(line)
+
+
 def ask_version(cfg, default="1.21.10"):
     """让用户选游戏版本：支持的直接输编号，别的版本手输版本号也行"""
     vs, local = supported_versions()
     print()
     print("  " + ui.section("选游戏版本（影响结构生成和群系判定）"))
+    print_version_list(vs, local)
     if vs:
-        tip = "这 %d 个版本我们准备了现成的模组，输编号选：" % len(vs)
-        print("  " + ui.info(tip))
-        if not local:
-            print("  " + ui.warn("（本地 mods/ 里没找到版本文件夹 —— 这份列表是内置的；"
-                                 "模组可能没下全，去 记录/日志.txt 看看）"))
-        for i, v in enumerate(vs, 1):
-            print("  " + ui.s(f"{i:2d}", "key") + " " + pad_name(v, 10), end="" if i % 4 else "\n")
         print()
     print("  " + ui.info("其它版本也能用 —— 直接输版本号（比如 1.19.2），"))
     print("  " + ui.info("但模组得自己编：python3 tools/build-mods.py --only-seedhelper <版本>"))
@@ -260,9 +284,19 @@ def do_settings(cfg):
             cfg["seed"] = int(raw)
         except ValueError:
             print("  " + ui.warn("种子必须是整数，忽略"))
-    raw = ask(f"版本 [{cfg['mc'] or '空'}]（回车不改 / 输编号选支持版本）: ", allow_empty=True)
+    # 支持哪些版本直接摆出来 —— 不然"输编号选"这四个字等于没说
+    vs, local = supported_versions()
+    print()
+    if vs:
+        print("  " + ui.s("支持的游戏版本（模组现成）", "accent")
+              + ui.s(f"    现在选的是 {cfg['mc'] or '空'}", "hint"))
+        print_version_list(vs, local)
+    else:
+        print("  " + ui.warn("本地 mods/ 里没找到版本文件夹 —— 手输版本号也行"))
+    print()
+    raw = ask(f"版本（回车不改 / 输编号选上面的 / 也能直接输版本号）[{cfg['mc'] or '空'}]: ",
+              allow_empty=True)
     if raw:
-        vs, local = supported_versions()
         if raw.isdigit() and vs and 1 <= int(raw) <= len(vs):
             cfg["mc"] = vs[int(raw) - 1]
             print("  " + ui.ok(f"选的是 {cfg['mc']}（模组在 mods/{cfg['mc']}/ 里现成的）"))
@@ -271,6 +305,8 @@ def do_settings(cfg):
             if vs and raw not in vs:
                 print("  " + ui.warn(f"{raw} 我们没准备模组 —— 要用得自己编"
                                     f"（tools/build-mods.py --only-seedhelper {raw}）"))
+            else:
+                print("  " + ui.ok(f"版本记成 {cfg['mc']}"))
     raw = ask(f"存档目录 [{cfg['save'] or '空'}]: ", allow_empty=True)
     if raw:
         cfg["save"] = raw
