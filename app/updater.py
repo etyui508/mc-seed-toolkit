@@ -95,12 +95,11 @@ GH_MANIFESTS = {"stable": "manifest.json", "beta": "manifest-beta.json"}
 ALLOWED_HOSTS = ("mcdownload.bony-doorframe-shortly.top", "github.com",
                  "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 STANDBY_HOSTS = ALLOWED_HOSTS
-# 备用站走 Cloudflare：清单万一被边缘节点缓存住，客户端就会有几个小时看不到新版本。
-# 所以每次问的时候挂一个"时间桶"参数 —— 换个桶就是新 URL，边上没有旧货可端。
-# （5 分钟一个桶：同一个桶里的重复请求还能吃到缓存，不会把下载站打爆；发布时
-#   publish.sh 会把接下来几个桶先"保温"好，所以新版本最多 5 分钟就全网可见，
-#   而且第一个用户也不用等回源）
-CACHE_BUCKET = 300
+# 备用站走 Cloudflare，清单本来会被边缘节点缓存住（用户就好几个小时看不到新版本）。
+# 现在 CF 那边已经配了"清单不缓存"的规则（见 mc-download/cf-cache-setup.py），
+# 所以默认不用再挂时间桶参数。万一哪天规则失效，可以设 MC_UPDATE_CACHE_BUCKET=300
+# 打开它：每次问清单都挂 ?t=<秒数/桶大小>，换个桶就是新 URL，边上没旧货可端。
+CACHE_BUCKET = int(os.environ.get("MC_UPDATE_CACHE_BUCKET") or 0)
 # 必须带一个自己的 User-Agent：Cloudflare 会把默认的 "Python-urllib/3.x" 当爬虫拦掉(403)
 BROWSER_UA = "Mozilla/5.0 (compatible; mc-seed-toolkit-updater)"
 
@@ -250,9 +249,10 @@ def fetch_manifest():
 def _fresh_url(url):
     """给备用站（自己的域名）的清单挂个时间桶参数，绕过 Cloudflare 的边缘缓存。
 
-    GitHub 那边不用动：它本来就每次回源。别的地址（调试自建镜像）也不动。
+    默认是不挂的（CF 那边已经配好"清单不缓存"）。只有 MC_UPDATE_CACHE_BUCKET
+    打开的时候才挂。GitHub 那边从来不动：它本来就每次回源。
     """
-    if "mcdownload.bony-doorframe-shortly.top" not in url:
+    if CACHE_BUCKET <= 0 or "mcdownload.bony-doorframe-shortly.top" not in url:
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}t={int(time.time() // CACHE_BUCKET)}"

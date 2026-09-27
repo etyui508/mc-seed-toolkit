@@ -308,7 +308,12 @@ def test_updater_sources():
         check("GitHub 连不上会自动换备用站",
               man["version"] == "9.9.9" and src.startswith("https://mcdownload."), src)
         check("两个地址都试过", len(tried) == 2, str(tried))
-        check("备用站清单挂了时间桶参数（躲边缘缓存）", "t=" in src and updater.check_url(src))
+        check("默认不挂时间桶（CF 那边已经配了清单不缓存）", "t=" not in src, src)
+        with mock.patch.object(updater, "CACHE_BUCKET", 300):
+            check("打开 MC_UPDATE_CACHE_BUCKET 时才会挂时间桶",
+                  "t=" in updater._fresh_url(updater.BASE_URL + "/manifest.json"))
+            check("时间桶不影响白名单校验",
+                  updater.check_url(updater._fresh_url(updater.BASE_URL + "/manifest.json")))
 
         def dead(url, timeout=None):
             raise urllib.error.URLError("全断")
