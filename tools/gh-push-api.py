@@ -53,7 +53,17 @@ def tracked_files():
     # core.quotepath=false：不然中文文件名会被转义成 \344\275\277 那种
     out = subprocess.run(["git", "-c", "core.quotepath=false", "ls-files"],
                          cwd=ROOT, capture_output=True, text=True).stdout
-    return [f for f in out.splitlines() if f.strip()]
+    files = [f for f in out.splitlines() if f.strip()]
+    # 光用 ls-files 会漏掉"新加但还没 git add 的文件"—— 上一次就因此把
+    # app/onboard.py 漏在仓库外面了。这里把未被忽略的新文件也带上。
+    out = subprocess.run(["git", "-c", "core.quotepath=false", "ls-files",
+                          "--others", "--exclude-standard"],
+                         cwd=ROOT, capture_output=True, text=True).stdout
+    extra = [f for f in out.splitlines() if f.strip()]
+    if extra:
+        print(f"（另有 {len(extra)} 个新文件还没 git add，也一起推：" +
+              "、".join(extra[:5]) + ("…" if len(extra) > 5 else "") + "）")
+    return files + extra
 
 
 def main():
