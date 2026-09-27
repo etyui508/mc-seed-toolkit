@@ -16,6 +16,8 @@ import sys
 import traceback
 import zipfile
 
+import i18n
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 RECORDS = os.path.join(ROOT, "记录")
@@ -24,6 +26,16 @@ OLD_LOG = os.path.join(RECORDS, "日志.1.txt")
 MAX_BYTES = 512 * 1024
 
 _installed = False
+
+
+def _t_log(text):
+    """日志里的事件名 / 字段名也翻译，但用独立的键（log:xxx），
+    免得跟界面上同名的文案串味（比如界面的「新版本」是 Available，
+    日志里当字段用就得是 new_version）。查不到就保持中文。"""
+    if i18n.current() == i18n.DEFAULT:
+        return text
+    got = i18n.t("log:" + text)
+    return text if got.startswith("log:") else got
 
 
 def _now():
@@ -86,8 +98,9 @@ def log(event, level="INFO", **fields):
     try:
         os.makedirs(RECORDS, exist_ok=True)
         _rotate()
-        detail = "  ".join(f"{k}={sanitize(v)}" for k, v in fields.items() if v not in (None, ""))
-        line = f"{_now()}  {level:<5} {event}"
+        detail = "  ".join(f"{_t_log(k)}={sanitize(v)}"
+                          for k, v in fields.items() if v not in (None, ""))
+        line = f"{_now()}  {level:<5} {_t_log(event)}"
         if detail:
             line += "  " + detail
         with open(LOG_FILE, "a", encoding="utf-8") as fh:
@@ -114,26 +127,27 @@ def environment():
     """把排查问题需要的环境信息收集起来（不含任何隐私）"""
     import config as cfgmod
     info = {
-        "工具版本": _version(),
-        "时间": _now(),
-        "系统": f"{platform.system()} {platform.release()} ({platform.machine()})",
+        _t_log("工具版本"): _version(),
+        _t_log("时间"): _now(),
+        _t_log("系统"): f"{platform.system()} {platform.release()} ({platform.machine()})",
         "Python": sys.version.split()[0],
-        "执行文件": sys.executable,
-        "界面": "彩色" if _ui_color() else "纯文本",
+        _t_log("执行文件"): sys.executable,
+        _t_log("界面"): _t_log("彩色") if _ui_color() else _t_log("纯文本"),
     }
     try:
         java = cfgmod.find_java()
-        info["Java"] = f"{cfgmod.check_java(java)}  {java}" if java else "没找到"
+        info["Java"] = f"{cfgmod.check_java(java)}  {java}" if java else _t_log("没找到")
     except Exception as e:
-        info["Java"] = f"检测失败（{e}）"
+        info["Java"] = _t_log("检测失败") + f"（{e}）"
     try:
         import engine
-        info["结构引擎"] = engine.FINDSTRUCT if os.path.exists(engine.FINDSTRUCT) else "缺失"
+        info[_t_log("结构引擎")] = (engine.FINDSTRUCT if os.path.exists(engine.FINDSTRUCT)
+                                    else _t_log("缺失"))
     except Exception:
         pass
     try:
         import state
-        info["当前版本"] = state.USER_VER or "（没选）"
+        info[_t_log("当前版本")] = state.USER_VER or _t_log("（没选）")
     except Exception:
         pass
     return info
@@ -197,19 +211,22 @@ def install_excepthook(notify=True):
         if notify:
             print()
             print("=" * 60)
-            print("  出错了。这段信息已经写进 记录/日志.txt")
+            print("  " + i18n.t("出错了。这段信息已经写进 记录/日志.txt"))
             print("=" * 60)
             # 崩了还让人自己去菜单里翻日志，太麻烦 —— 直接问一句要不要发出去
             try:
                 import ui
-                if ui.INTERACTIVE and input("  直接把这段报错发给作者吗？[Y/n] ").strip().lower() != "n":
-                    ok, msg = submit(f"崩溃：{type(value).__name__}", str(value)[:2000],
+                if (ui.INTERACTIVE
+                        and input("  " + i18n.t("直接把这段报错发给作者吗？")
+                                  + "[Y/n] ").strip().lower() != "n"):
+                    ok, msg = submit(i18n.t("崩溃：{kind}", kind=type(value).__name__),
+                                     str(value)[:2000],
                                      "", extra=detail)
                     print("  " + ("✓ " + msg if ok else "· " + msg))
                 else:
-                    print("  那稍后可以用主菜单 5【反馈问题】发出去")
+                    print("  " + i18n.t("那稍后可以用主菜单 5【反馈问题】发出去"))
             except Exception:
-                print("  （想反馈就发 记录/日志.txt）")
+                print("  " + i18n.t("（想反馈就发 记录/日志.txt）"))
         return old(kind, value, tb)
 
     sys.excepthook = hook
@@ -273,8 +290,14 @@ def bundle(include_records=True):
 
 
 if __name__ == "__main__":
-    print("环境信息：")
+    # 单独跑这个脚本时也要按配置里的语言来，不然英文用户看到的还是中文
+    try:
+        import config as cfgmod
+        i18n.set_lang(cfgmod.load().get("lang") or i18n.guess_from_system())
+    except Exception:
+        pass
+    print(i18n.t("环境信息："))
     for k, v in environment().items():
         print(f"  {k}: {v}")
-    print(f"\n日志文件：{LOG_FILE}")
+    print("\n" + i18n.t("日志文件：{path}", path=LOG_FILE))
     print(text(limit=20))

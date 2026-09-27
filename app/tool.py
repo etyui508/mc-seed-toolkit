@@ -578,7 +578,8 @@ def main():
     i18n.set_lang(cfg.get("lang") or i18n.guess_from_system())
     first = cfg.get("seed") is None
     diag.install_excepthook()
-    diag.log("启动", 版本=updater.local_version(), 有种子=("有" if cfg.get("seed") else "无"),
+    diag.log("启动", 版本=updater.local_version(),
+             有种子=(_("有") if cfg.get("seed") else _("无")),
              版本号=cfg.get("mc") or "未选")
     # 开屏动画的进度条不是白转的：启动要等的事（联网查更新）就在这里面干完，
     # 所以条子会真的走到底，走完主菜单立刻就出来。
