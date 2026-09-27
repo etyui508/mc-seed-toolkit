@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 输出和游戏本体一致（且顺序正确）的 classpath
 set -euo pipefail
-MC_DIR="/mnt/d/666/新建文件夹/.minecraft"
+MC_DIR="${MC_DIR:-$HOME/.minecraft}"        # 你本地 Minecraft 目录
 VERSION="$MC_DIR/versions/1.21.10-Fabric 0.19.3"
 python3 - "$VERSION" <<'PY'
 import json, os, sys

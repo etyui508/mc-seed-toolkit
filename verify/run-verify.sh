@@ -2,7 +2,7 @@
 # 用游戏本体里的类对拍我们的复刻实现（末地柱子 / 史莱姆区块 / 结构摆放）
 set -euo pipefail
 
-MC_DIR="/mnt/d/666/新建文件夹/.minecraft"
+MC_DIR="${MC_DIR:-$HOME/.minecraft}"        # 你本地 Minecraft 目录
 VERSION="$MC_DIR/versions/1.21.10-Fabric 0.19.3"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(dirname "$HERE")"

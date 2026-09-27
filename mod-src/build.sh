@@ -5,7 +5,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MC_DIR="/mnt/d/666/新建文件夹/.minecraft"
+# 你本地 Minecraft 目录（WSL 下就是 /mnt/d/.../.minecraft 这种；默认 ~/.minecraft）
+MC_DIR="${MC_DIR:-$HOME/.minecraft}"
 VERSION="$MC_DIR/versions/1.21.10-Fabric 0.19.3"
 LIBS="$MC_DIR/libraries"
 INTERMEDIARY="$VERSION/.fabric/remappedJars/minecraft-1.21.10-0.19.3/client-intermediary.jar"

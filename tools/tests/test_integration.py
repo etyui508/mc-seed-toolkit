@@ -18,7 +18,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-SEED = -3585461171300822119        # 作者的测试种子（不是谁的服务器）
+# 随便挑的一个测试种子（跟作者自己的存档没关系 —— 这里故意不用真种子）
+SEED = -2026092700000000001
 VER = "1.21.10"
 FULL = "--full" in sys.argv
 

@@ -388,14 +388,14 @@ def adapt_path(path):
 
     win = _re.match(r"^([A-Za-z]):[\\/](.*)$", p)
     if os.name != "nt":
-        if win:                                   # D:\666\x -> /mnt/d/666/x
+        if win:                                   # D:\x -> /mnt/d/x
             return "/mnt/%s/%s" % (win.group(1).lower(), win.group(2).replace("\\", "/"))
         unc = _re.match(r"^\\\\wsl(?:\.localhost)?\\[^\\]+\\(.*)$", p)
         if unc:                                   # \\wsl.localhost\Ubuntu\home\x -> /home/x
             return "/" + unc.group(1).replace("\\", "/")
     else:
         m = _re.match(r"^/mnt/([a-zA-Z])(?:/(.*))?$", p)
-        if m:                                     # /mnt/d/666/x -> D:\666\x
+        if m:                                     # /mnt/d/x -> D:\x
             rest = (m.group(2) or "").replace("/", "\\")
             return ("%s:\\%s" % (m.group(1).upper(), rest)) if rest else ("%s:\\" % m.group(1).upper())
     return p
