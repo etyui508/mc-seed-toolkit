@@ -593,6 +593,15 @@ def test_egg():
     i18n.set_lang("zh")
     check("切得回来", i18n.t("主菜单") == "主菜单")
 
+    # 英文机翻：界面是英文时，机翻也该吐英文（app/lang/mt-en.json）
+    check("英文机翻也是藏起来的",
+          "mt-en" not in [code for code, _ in i18n.available()])
+    check("英文机翻切得进去", i18n.set_lang("mt-en") == "mt-en")
+    check("英文机翻吐的是英文", i18n.t("退出") != "退出"
+          and not any("\u4e00" <= c <= "\u9fff" for c in i18n.t("退出")),
+          f"退出 -> {i18n.t('退出')}")
+    i18n.set_lang("zh")
+
     # —— Yes ② 那个"原地旋转" ——
     grid = [["A", "B", "C"], ["D", "E", "F"]]
     spun = grid
@@ -621,6 +630,14 @@ def test_egg():
     broken = [k for k, v in mt.items() if sorted(ph.findall(k)) != sorted(ph.findall(v))]
     check("机翻表里 {占位符} 一个都没丢", not broken, "、".join(broken[:3]))
     check("机翻表没留下保护标记", not [k for k, v in mt.items() if re.search(r"ZQ\d+QZ", v)])
+
+    with open(os.path.join(APP, "lang", "mt-en.json"), encoding="utf-8") as fh:
+        mten = json.load(fh)
+    check("英文机翻表的键都能在 en 表里找到", not [k for k in mten if k not in en])
+    check("英文机翻表没有空译文", all(v.strip() for v in mten.values()))
+    broken_en = [k for k, v in mten.items()
+                 if sorted(ph.findall(k)) != sorted(ph.findall(v))]
+    check("英文机翻表的 {占位符} 一个都没丢", not broken_en, "、".join(broken_en[:3]))
 
 
 def test_onboard():

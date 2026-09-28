@@ -219,13 +219,18 @@ def _spin():
 
 # ---------------------------------------------------------------- Yes ③
 def _mt(cfg):
-    """切成「人机翻译版」，顺手把语言记进配置（下次启动还是它）。"""
-    i18n.set_lang("mt")
-    cfg["lang"] = "mt"
+    """切成「人机翻译版」，顺手把语言记进配置（下次启动还是它）。
+
+    机翻跟着界面语言走：正在用英文，就切英文机翻（app/lang/mt-en.json），
+    否则切中文机翻（app/lang/mt.json）。
+    """
+    target = "mt-en" if i18n.current() in ("en", "mt-en") else "mt"
+    i18n.set_lang(target)
+    cfg["lang"] = target
     try:
         cfgmod.save(cfg)
     except Exception:
         pass
-    print("  " + ui.ok(_("语言已切换：{name}", name=i18n.lang_name("mt"))))
+    print("  " + ui.ok(_("语言已切换：{name}", name=i18n.lang_name(target))))
     print("  " + ui.info(_("雷时东雷时东粉末雷时东滚木")))
     print("  " + ui.info(_("想切回来：主菜单 3【设置】最上面那一项。")))

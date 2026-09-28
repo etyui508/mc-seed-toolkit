@@ -25,9 +25,14 @@
   · **{占位符} 换成 ZQ0QZ 记号**再上路（{path} 会被翻成 {路径}），回来校验；
   · **逐批落盘**：断了从上次的地方接着跑，不会白跑。
 
-    python3 tools/make-mt-lang.py              # 接着上次跑
-    python3 tools/make-mt-lang.py --refresh    # 全部重来
-    python3 tools/make-mt-lang.py --check      # 只比对，不写文件（不联网）
+两份表，跟着界面语言走：
+  · 界面是中文 → 机翻也吐中文（app/lang/mt.json）
+  · 界面是英文 → 机翻也吐英文（app/lang/mt-en.json）
+
+    python3 tools/make-mt-lang.py                 # 中文机翻，接着上次跑
+    python3 tools/make-mt-lang.py --target en     # 英文机翻
+    python3 tools/make-mt-lang.py --refresh       # 全部重来
+    python3 tools/make-mt-lang.py --check         # 只比对，不写文件（不联网）
 """
 import argparse
 import json
@@ -40,7 +45,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 EN = os.path.join(ROOT, "app", "lang", "en.json")
-MT = os.path.join(ROOT, "app", "lang", "mt.json")
+
+# target -> (输出文件名, 缓存文件名, 链的最后一跳)
+TARGETS = {
+    "zh": ("mt.json", "mt-cache.json", "zh-CN"),
+    "en": ("mt-en.json", "mt-cache-en.json", "en"),
+}
+MT = os.path.join(ROOT, "app", "lang", "mt.json")          # main() 里按 target 换
 CACHE = os.path.join(HERE, "mt-cache.json")
 
 API = os.environ.get("MT_API", "https://api.deepseek.com/chat/completions")
@@ -50,20 +61,44 @@ BATCH_CHARS = 900          # 一批拼多长
 BATCH_MAX = 25             # 一批最多几行
 ATTEMPTS = 4
 
-SYSTEM = (
-    "你是一台 1998 年的机翻引擎，词库很小、语法很死。铁律：\n"
-    "1) 严格按源文本的词序逐词翻译，绝不调整语序、绝不合并短句；\n"
-    "2) 每个词只取最字面的常见义，哪怕在这个句子里明显不对"
-    "（Settings=安装，Quit=戒烟，Releases=开发版，Roll back=回滚，"
-    "seed=籽，structure=建筑物，End=结束，right away=右离开）；\n"
-    "3) 功能词（the/a/of/to/and 这类）能不译就不译；\n"
-    "4) 绝对不许润色，不许补主语，读着别扭、像机器硬拼的才对；\n"
-    "5) 数字、路径、{花括号里的占位符} 原样保留。"
-)
-CHAIN = ("把每一行按这个顺序连续翻译十遍：英语→日语→韩语→法语→德语→俄语→"
-         "阿拉伯语→泰语→越南语→西班牙语→中文。每一次都用上面那套死板的逐词"
-         "规则，别让它变通顺。一行输入只对应一行输出：不要解释、不要补充说明、"
-         "不要拆成多行、不要加序号。")
+SYSTEM = {
+    "zh": (
+        "你是一台 1998 年的机翻引擎，词库很小、语法很死。铁律：\n"
+        "1) 严格按源文本的词序逐词翻译，绝不调整语序、绝不合并短句；\n"
+        "2) 每个词只取最字面的常见义，哪怕在这个句子里明显不对"
+        "（Settings=安装，Quit=戒烟，Releases=开发版，Roll back=回滚，"
+        "seed=籽，structure=建筑物，End=结束，right away=右离开）；\n"
+        "3) 功能词（the/a/of/to/and 这类）能不译就不译；\n"
+        "4) 绝对不许润色，不许补主语，读着别扭、像机器硬拼的才对；\n"
+        "5) 数字、路径、{花括号里的占位符} 原样保留。"
+    ),
+    "en": (
+        "You are a 1998 machine-translation engine with a tiny word list and "
+        "rigid grammar. Iron rules:\n"
+        "1) translate word by word in the exact source order; never reorder, "
+        "never merge short sentences;\n"
+        "2) take only the most literal sense of each word even when it is "
+        "obviously wrong here (Quit=give up smoking, Settings=installation, "
+        "Roll back=back roll, seed=pip, structure=building, End=finish, "
+        "right away=right leave);\n"
+        "3) drop function words (the/a/of/to/and) whenever you can;\n"
+        "4) never polish, never add a subject, never let it read smoothly — "
+        "it must sound like a machine stapled it together;\n"
+        "5) keep numbers, paths and {placeholders in braces} untouched.\n"
+        "Output English only."
+    ),
+}
+CHAIN = {
+    "zh": ("把每一行按这个顺序连续翻译十遍：英语→日语→韩语→法语→德语→俄语→"
+           "阿拉伯语→泰语→越南语→西班牙语→中文。每一次都用上面那套死板的逐词"
+           "规则，别让它变通顺。一行输入只对应一行输出：不要解释、不要补充说明、"
+           "不要拆成多行、不要加序号。"),
+    "en": ("Take each line through ten machine translations in this order: "
+           "English→Japanese→Korean→French→German→Russian→Arabic→Thai→"
+           "Vietnamese→Spanish→English. Every hop must follow those rigid "
+           "word-for-word rules; never let it smooth out. One input line = "
+           "one output line: no explaining, no notes, no splitting, no numbering."),
+}
 
 # 翻完之后的小替换：引擎把 Minecraft 翻成"我的世界"，但这个彩蛋叫"雷时东"
 TERMS = (
@@ -76,6 +111,7 @@ MARKER = "ZQ%dQZ"          # 全大写记号不会被翻译（试过 <PH0>、[[0
 
 _calls = 0
 _fallback = []
+_target = "zh"             # main() 里按 --target 设
 
 
 def has_cjk(text):
@@ -124,6 +160,8 @@ def restore(text, names):
 
 
 def decorate(text):
+    if _target != "zh":
+        return text            # "雷时东"只用在中文机翻里
     for zh, mt in TERMS:
         text = text.replace(zh, mt)
     return text
@@ -132,11 +170,11 @@ def decorate(text):
 def ask(lines, key, lenient=False):
     """一次翻一批：把若干行交给"机翻引擎"，返回等长的译文行。"""
     global _calls
-    user = (CHAIN + "\n\n输出要求：行数必须和输入完全一致，一行一条，"
+    user = (CHAIN[_target] + "\n\n输出要求：行数必须和输入完全一致，一行一条，"
             "不要编号、不要解释、不要空行。\n\n" + "\n".join(lines))
     payload = {"model": MODEL,
                "thinking": {"type": "disabled"},      # 思维链又慢又贵，这里不需要
-               "messages": [{"role": "system", "content": SYSTEM},
+               "messages": [{"role": "system", "content": SYSTEM[_target]},
                             {"role": "user", "content": user}],
                "max_tokens": max(1200, 160 * len(lines)),
                "temperature": 0.6}
@@ -160,6 +198,9 @@ def ask(lines, key, lenient=False):
         rows = [r for r in got.splitlines() if r.strip()]
         if len(rows) == len(lines):
             return rows
+        # 单条输入、但原文自己就带换行（0.7% 的句子是这样）：把回的多行拼回去
+        if len(lines) == 1 and rows and "\n" in lines[0]:
+            return ["\n".join(rows)]
         # 单行输入时模型偶尔会多嘴写两三行；只取第一行（提示词已经要求它别解释）
         if lenient and len(lines) == 1 and rows:
             return [rows[0]]
@@ -262,10 +303,18 @@ def finalize(english, raw, key):
 
 
 def main():
+    global MT, CACHE, _target
     ap = argparse.ArgumentParser()
+    ap.add_argument("--target", choices=sorted(TARGETS), default="zh",
+                    help="机翻输出成哪种语言（默认 zh）")
     ap.add_argument("--refresh", action="store_true", help="全部重来（清掉缓存）")
     ap.add_argument("--check", action="store_true", help="只比对，不写文件（不联网）")
     args = ap.parse_args()
+    _target = args.target
+    out_name, cache_name, _last = TARGETS[_target]
+    MT = os.path.join(ROOT, "app", "lang", out_name)
+    CACHE = os.path.join(HERE, cache_name)
+    print(f"目标语言：{_target} -> {out_name}", flush=True)
 
     if args.check:
         with open(EN, encoding="utf-8") as fh:
