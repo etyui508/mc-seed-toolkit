@@ -489,6 +489,30 @@ def test_updater_sources():
                 os.environ[k] = v
 
 
+def test_spinner():
+    """回归：进度动画不能被抓结果的那层重定向吞掉（以前会跑完一股脑吐出来）"""
+    section("进度动画（不能污染被重定向的结果）")
+    import contextlib
+    import io
+    import time as _time
+    import ui
+    import engine
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):          # run_and_log 就是这么抓结果的
+        with ui.spinner("测试用动画"):
+            _time.sleep(0.2)
+        print("结果第一行")
+    captured = buf.getvalue()
+    check("结果照样被抓到", "结果第一行" in captured)
+    check("动画帧不会混进结果里",
+          not any(c in captured for c in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+          and "\r" not in captured, repr(captured[:40]))
+    check("strip_progress 能擦掉 \\r 残留", engine.strip_progress("a\rb\n") == "b\n")
+    check("strip_progress 不动正常文本",
+          engine.strip_progress("第一行\n第二行\n") == "第一行\n第二行\n")
+
+
 def test_i18n():
     section("界面多语言（中英文）")
     import i18n
@@ -505,6 +529,23 @@ def test_i18n():
     # 代码里用到的 key 必须在表里有译文，不然就是漏翻了（只抽查菜单这几条）
     for key in ("主菜单", "计算种子", "设置", "检查更新", "退出"):
         check(f"菜单有译文：{key}", key in table)
+
+    # 发布说明的双语拆分（"中文 / English" 要各取一半）
+    zh, en = i18n.split_notes("修了个 bug。 / Fixed a bug in the seed search.")
+    check("双语说明能拆开", zh == "修了个 bug。" and en.startswith("Fixed a bug"))
+    zh2, en2 = i18n.split_notes("剪贴板 / txt / json / mcfunction")
+    check("中文里的斜杠不会被误拆", en2 == "" and zh2.startswith("剪贴板"))
+    zh3, en3 = i18n.split_notes("中文说明（中文 / 英文）都在 / 2.0.0 beta: picker on first launch")
+    check("中文里带斜杠也能拆对", zh3.endswith("2.0.0") is False and en3.startswith("2.0.0 beta"))
+    check("显式分隔符优先",
+          i18n.split_notes("中文\n=== EN ===\nEnglish notes") == ("中文", "English notes"))
+    man = {"notes": "中文说明 / English notes with the words"}
+    i18n.set_lang("en")
+    check("英文界面取英文那半", i18n.pick_notes(man).startswith("English"))
+    i18n.set_lang("zh")
+    check("中文界面取中文那半", i18n.pick_notes(man) == "中文说明")
+    check("老说明（只有中文）英文界面下退回中文",
+          i18n.pick_notes({"notes": "只有中文"}) == "只有中文")
     i18n.set_lang("zh")
 
 
@@ -671,6 +712,7 @@ def main():
     test_updater_apply()
     test_updater_plan()
     test_updater_sources()
+    test_spinner()
     test_i18n()
     test_onboard()
     test_export()

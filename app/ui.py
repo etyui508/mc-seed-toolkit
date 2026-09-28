@@ -56,9 +56,9 @@ def _can_encode(text):
         return False
 
 
-def _isatty():
+def _isatty(stream=None):
     try:
-        return bool(sys.stdout.isatty())
+        return bool((stream or sys.stdout).isatty())
     except Exception:
         return False
 
@@ -150,6 +150,35 @@ _CODES = {
 
 CLR = "\x1b[2K"                # 清掉整行（交互菜单重画用）
 CLEAR_LINE = "\r" + CLR        # 回到行首 + 清掉（进度条原地刷新用）
+
+
+def console():
+    """真正的终端输出。
+
+    为什么要单独找它：跑慢活儿时工具会用 contextlib.redirect_stdout 把输出
+    重定向到内存里（好把结果同时写进日志）。那时候 sys.stdout 已经变成字符串
+    缓冲区了 —— 转圈动画要是还往那儿写，就会被关进缓冲区，跑的时候屏幕上
+    什么都不显示，跑完再一口气全糊出来。所以动画要往 sys.__stdout__ 写。
+    """
+    out = getattr(sys, "__stdout__", None)
+    try:
+        out.write("")
+        return out
+    except Exception:
+        return None
+
+
+def init_console():
+    """让输出一行一行实时出来。
+
+    输出被接到管道/启动器里时，Python 默认会攒够一大块才写出去，
+    于是用户看到的是"卡半天，然后一口气全出来"。这里打开行缓冲。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True, write_through=True)
+        except Exception:
+            pass
 
 # 统一配色，想换风格只动这里
 STYLES = {
@@ -632,35 +661,64 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
 
 # ---------------------------------------------------------------- 转圈
 class _Spinner:
-    """跑慢活儿的时候转个圈 + 显示已用时间（不是真终端就什么都不画）"""
+    """跑慢活儿的时候转个圈 + 显示已用时间。
 
-    def __init__(self, text=""):
+    三条规矩：
+      · 往**真正的终端**写（ui.console()），这样 run_and_log 那种"重定向到
+        缓冲区"不会把动画一起吞掉，跑完再一口气吐出来；
+      · 真终端里只占一行：\\r 回到行首 + 空格补齐（不依赖 \\x1b[K 清行，
+        老 cmd 只认 \\r 也能原地刷新）；
+      · 输出被接走（不是终端）时，改成每几秒打一行，别一声不吭。
+    """
+
+    HEARTBEAT = 5.0        # 不是终端时：多久打一行
+
+    def __init__(self, text="", delay=0.35):
         self.text = text or _("正在算")
+        self.delay = delay          # 一眨眼就完事的活儿别闪一下动画
+        self._out = console()
+        self._term = bool(self._out) and _isatty(self._out)
+        self._width = 0             # 上一次画了多宽，用来把残留擦干净
         self._stop = None
         self._thread = None
 
     def __enter__(self):
-        if not ANSI:
+        if not self._out:
             return self
         import threading
-        import time
-        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" if SYMBOLS else "-\\|/"
         self._stop = threading.Event()
         stop = self._stop
 
         def loop():
+            import time
             t0 = time.time()
             i = 0
-            while not stop.is_set():
-                line = (CLEAR_LINE + "  " + s(self.text, "hint") + "  "
-                        + s(frames[i % len(frames)], "accent")
-                        + s("  " + _("已用 {t}s", t=f"{time.time() - t0:.1f}"), "dim"))
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                i += 1
-                stop.wait(0.12)
-            sys.stdout.write(CLEAR_LINE)
-            sys.stdout.flush()
+            frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" if SYMBOLS else "-\\|/"
+            next_beat = self.delay if not self._term else self.delay
+            while not stop.wait(0.12 if self._term else 0.25):
+                elapsed = time.time() - t0
+                if elapsed < self.delay:
+                    continue
+                if self._term:
+                    line = ("  " + s(self.text, "hint") + "  "
+                            + s(frames[i % len(frames)], "accent")
+                            + s("  " + _("已用 {t}s", t=f"{elapsed:.1f}"), "dim"))
+                    pad = max(0, self._width - w(line))
+                    try:
+                        self._out.write("\r" + line + " " * pad)
+                        self._out.flush()
+                    except Exception:
+                        return
+                    self._width = max(self._width, w(line))
+                    i += 1
+                elif elapsed >= next_beat:
+                    next_beat = elapsed + self.HEARTBEAT
+                    try:
+                        self._out.write("  " + self.text + "  "
+                                        + _("已用 {t}s", t=f"{elapsed:.1f}") + "\n")
+                        self._out.flush()
+                    except Exception:
+                        return
 
         self._thread = threading.Thread(target=loop, daemon=True)
         self._thread.start()
@@ -671,6 +729,12 @@ class _Spinner:
             self._stop.set()
             if self._thread:
                 self._thread.join(timeout=2)
+        if self._term and self._width and self._out:
+            try:                       # 把这一行擦干净，后面的正式输出从行首开始
+                self._out.write("\r" + " " * self._width + "\r")
+                self._out.flush()
+            except Exception:
+                pass
         return False
 
 

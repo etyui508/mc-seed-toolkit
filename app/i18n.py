@@ -106,3 +106,64 @@ def t(text, **kw):
             except Exception:
                 s = text
     return s
+
+
+def split_notes(text):
+    """把"中文 / English"这种双语发布说明拆成 (中文, 英文)。
+
+    拆不开就返回 (原文, "")。
+
+    规矩：左边有中文、右边一个中文都没有、而且右边像一句英文（带 the/and/to 这类
+    虚词）才算真的双语。这样「剪贴板 / txt / json」不会被拆错，
+    「（中文 / 英文）」这种藏在中文里的斜杠也骗不过去。
+    想百分百确定的话，用显式分隔符 `=== EN ===` 那几种，不走猜的。
+    """
+    text = str(text or "").strip()
+    if not text:
+        return "", ""
+    # 显式分隔符：怎么切都不会错，优先用
+    for sep in ("\n=== EN ===\n", "\n== EN ==\n", "\n\n---\n\n", "|||"):
+        if sep in text:
+            head, _, tail = text.partition(sep)
+            if head.strip() and tail.strip():
+                return head.strip(), tail.strip()
+    best = None
+    for sep in (" / ", "｜"):
+        start = 0
+        while True:
+            i = text.find(sep, start)
+            if i < 0:
+                break
+            head, tail = text[:i], text[i + len(sep):]
+            if (head.strip() and tail.strip() and _has_cjk(head)
+                    and not _has_cjk(tail) and _looks_english(tail)):
+                if best is None or len(tail) > len(best[1]):
+                    best = (head.strip(), tail.strip())
+            start = i + len(sep)
+    return best if best else (text, "")
+
+
+def _has_cjk(text):
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(text))
+
+
+# 判断"这半像不像一句英文"用的虚词（中文说明里几乎不会出现这些）
+_EN_WORDS = (" the ", " a ", " an ", " to ", " and ", " of ", " for ", " with ",
+             " on ", " in ", " is ", " are ", " by ", " from ", " that ")
+
+
+def _looks_english(text):
+    low = " " + str(text).lower().replace("\n", " ") + " "
+    return any(word in low for word in _EN_WORDS)
+
+
+def pick_notes(man):
+    """从更新清单里按当前语言挑出发布说明。
+
+    优先用单独的 notes_en 字段；没有就把 notes 里的"中文 / English"拆开取对应那半；
+    英文那半缺失（老版本说明）时，英文界面下退回显示中文，总比空着强。
+    """
+    zh, en = split_notes(man.get("notes"))
+    if current() == "en":
+        return str(man.get("notes_en") or "").strip() or en or zh
+    return zh or str(man.get("notes") or "")

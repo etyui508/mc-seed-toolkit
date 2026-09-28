@@ -100,12 +100,31 @@ def run(cmd, quiet=False):
 def blocks_to_chunks(x, z):
     return math.floor(x / 16), math.floor(z / 16)
 
+def strip_progress(text):
+    """把被误抓进来的进度痕迹擦掉。
+
+    跑慢活儿的时候是往真终端画动画的（ui.spinner），但万一有别的地方把输出
+    重定向进缓冲区，动画那几十帧就会混进结果里 —— 屏幕上看着是一堆乱行，
+    日志里也是。这里兜一层：一行里只保留最后一个 \\r 之后的内容，
+    再去掉清行转义。
+    """
+    text = str(text).replace("\x1b[2K", "").replace("\x1b[K", "")
+    # 注意：不能用 splitlines() —— 它把 \r 也当换行，那样 "a\rb" 会变成两行，
+    # 反而擦不掉。这里只按 \n 断行，再把每行里 \r 之前的部分丢掉。
+    ends_with_nl = text.endswith("\n")
+    lines = [l.split("\r")[-1] for l in text.split("\n")]
+    if ends_with_nl:
+        lines = lines[:-1]
+    out = "\n".join(lines)
+    return out + ("\n" if ends_with_nl else "")
+
+
 def run_and_log(func, args, label):
     """跑一个功能，同时把结果打到屏幕 + 追加到日志文件"""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         func(args)
-    text = buf.getvalue()
+    text = strip_progress(buf.getvalue())
     if not state.SHOW_SEED and state.SEED is not None:
         text = text.replace(str(state.SEED), cfgmod.mask(state.SEED, False))
     print(_pretty(text), end="")

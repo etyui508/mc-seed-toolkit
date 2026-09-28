@@ -411,7 +411,8 @@ def update_panel(man):
                               ch=_(updater.CHANNEL_NAMES.get(ch, ch))), "dim"), ""]
     if man.get("notes"):
         lines.append(ui.s(_("更新说明"), "accent"))
-        for row in str(man["notes"]).splitlines() or [""]:
+        # 发布说明可能是双语写在一起的（"中文 / English"）：按当前语言只显示对应那半
+        for row in (i18n.pick_notes(man) or "").splitlines() or [""]:
             lines.append("  " + ui.fit(row, 56))
         lines.append("")
     plan_now = updater.plan(man)
@@ -574,6 +575,7 @@ def do_feedback():
 
 
 def main():
+    ui.init_console()          # 输出别攒着：管道里也要一行一行实时出来
     cfg = load_config()
     # 语言：配置里存的优先；第一次用还没存过就按系统区域猜一个
     i18n.set_lang(cfg.get("lang") or i18n.guess_from_system())
