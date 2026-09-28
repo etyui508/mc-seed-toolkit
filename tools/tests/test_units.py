@@ -580,7 +580,11 @@ def test_egg():
     check("机翻是藏起来的：不进选语言那屏",
           "mt" not in [code for code, _ in i18n.available()])
     check("但切得进去", i18n.set_lang("mt") == "mt")
-    check("机翻表确实加载了", i18n.t("主菜单") == "主 菜 单", i18n.t("主菜单"))
+    # 机翻表是拿英文译文过真翻译引擎翻回来的，不对具体词做断言（换引擎就会变），
+    # 只要求它确实动过、而且没翻出空
+    check("机翻表确实加载了（译文和原文不一样）",
+          i18n.t("退出") != "退出" and i18n.t("退出").strip(),
+          f"退出 -> {i18n.t('退出')}")
     check("没翻到的照旧回落中文，不会变空",
           i18n.t("这句话还没翻译") == "这句话还没翻译")
     check("机翻的名字写它自己", i18n.lang_name("mt") == "机翻")
@@ -611,6 +615,12 @@ def test_egg():
     check("机翻表的键都能在 en 表里找到", not [k for k in mt if k not in en])
     check("机翻表没有空译文", all(v.strip() for v in mt.values()))
     check("机翻表不掺日志键", not [k for k in mt if k.startswith("log:")])
+    # 占位符是硬要求：{path} 被翻掉，那个功能的提示就废了
+    import re
+    ph = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+    broken = [k for k, v in mt.items() if sorted(ph.findall(k)) != sorted(ph.findall(v))]
+    check("机翻表里 {占位符} 一个都没丢", not broken, "、".join(broken[:3]))
+    check("机翻表没留下保护标记", not [k for k, v in mt.items() if re.search(r"ZQ\d+QZ", v)])
 
 
 def test_onboard():
