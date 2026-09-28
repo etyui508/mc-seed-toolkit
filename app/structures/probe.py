@@ -3,6 +3,10 @@
 """通用探测：按种子查某一种结构（走 out/findstruct）。22 个原版结构都用它。"""
 import argparse
 
+import i18n
+
+_ = i18n.t
+
 import engine
 def _all():
     """延迟取注册表（__init__ 建好 ALL 之后才用得到）"""
@@ -56,7 +60,7 @@ def run_cli(args):
         for name, items in hits.items():
             if (wanted is None or wanted in name or disp in name
                     or _key_to_disp().get(name) == disp or name == _key):
-                engine.print_hits(f"[主世界/下界/末地] {_key_to_disp().get(name, name)}",
+                engine.print_hits(_("[主世界/下界/末地] {name}", name=_key_to_disp().get(name, name)),
                            sorted(items, key=lambda t: t[2]), extra=with_biome, limit=args.top)
                 printed = True
                 if engine.is_nether_name(name) or engine.is_nether_name(disp):
@@ -79,12 +83,11 @@ def run_cli(args):
 def run_interactive(st, ctx):
     """菜单里选中某个原版结构时走的流程"""
     center = ctx.ask_center((0, 0))
-    radius = ctx.number("搜索半径（默认 %d 格）: " % st.radius, st.radius)
+    radius = ctx.number(_("搜索半径（默认 {n} 格）: ", n=st.radius), st.radius)
     min_dist, max_dist = ctx.ask_dist()
-    top = ctx.number("要几个（默认 %d）: " % st.top, st.top)
+    top = ctx.number(_("要几个（默认 {n}）: ", n=st.top), st.top)
     if st.nether:
-        side = (ctx.ask("你给的中心坐标是哪边的？ 1) 主世界（我按 ÷8 换算到下界）"
-                        " 2) 下界（原样用）[默认 1]: ") or "1").strip()
+        side = (ctx.ask(_("你给的中心坐标是哪边的？ 1) 主世界（我按 ÷8 换算到下界） 2) 下界（原样用）[默认 1]: ")) or "1").strip()
         if side != "2":
             nx, nz = engine.overworld_to_nether(center[0], center[1])
             radius = max(1, radius // 8)
@@ -98,4 +101,5 @@ def run_interactive(st, ctx):
         run_cli,
         argparse.Namespace(name=st.name, center=list(center), radius=radius, top=top,
                            min_dist=min_dist, max_dist=max_dist, from_dim="nether"),
-        f"{st.name} 中心{center} 半径{radius} 距离{min_dist}~{max_dist}")
+        _("{name} 中心{center} 半径{radius} 距离{a}~{b}",
+          name=_(st.name), center=center, radius=radius, a=min_dist, b=max_dist))

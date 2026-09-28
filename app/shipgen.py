@@ -33,6 +33,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))          # app/ 目录
 ROOT = os.path.dirname(HERE)                               # 工具包根目录
 sys.path.insert(0, HERE)
 import config as cfgmod
+import i18n
+
+# 界面文字都过一遍 i18n；查不到译文就原样显示中文
+_ = i18n.t
 
 OUT = os.path.join(ROOT, "out")
 SIZES = os.path.join(ROOT, "tools", "endcity-sizes.txt")
@@ -131,15 +135,16 @@ def game_classpath(mcver=None, want=None):
         pick = next((c for c in cands if c[3] == "fabric"), cands[0])
     mc, vdir, jar, kind = pick
     if want and kind != want:
-        return None, (f"这个版本只有 {kind} 形式的游戏本体，"
-                      f"但预测器需要 {want}（{os.path.basename(vdir)}）")
+        return None, (_("这个版本只有 {kind} 形式的游戏本体，", kind=kind)
+                      + _("但预测器需要 {want}（{dir}）",
+                          want=want, dir=os.path.basename(vdir)))
     jar_tag = os.path.basename(os.path.dirname(jar))     # 例如 minecraft-1.21.10-0.19.3
     if mcver and kind == "fabric" and str(mcver) not in jar_tag:
-        return None, (f"游戏版本对不上：只有 {jar_tag} 这一版，"
-                      f"末地船预测目前只编译了 1.21.10 和 26.3")
+        return None, (_("游戏版本对不上：只有 {tag} 这一版，", tag=jar_tag)
+                      + _("末地船预测目前只编译了 1.21.10 和 26.3"))
     libs = _libs_for(mc, vdir)
     if not libs:
-        return None, "游戏版本 JSON 里没读到启动器库（libraries）"
+        return None, _("游戏版本 JSON 里没读到启动器库（libraries）")
     return os.pathsep.join([jar] + libs), None
 
 
@@ -168,11 +173,11 @@ def available():
     # ② 退路：跑游戏本体的生成器（要本机装过 Minecraft，且只编了 1.21.10 / 26.3）
     ver = cfgmod.load().get("mc")
     if not variant_for(ver):
-        return False, (f"没找到 out/findstruct（包里自带的引擎）；退路要跑游戏本体，"
-                       f"而 {ver} 这一版也没编（目前只有 1.21.10 和 26.3）")
+        return False, (_("没找到 out/findstruct（包里自带的引擎）；退路要跑游戏本体，")
+                       + _("而 {ver} 这一版也没编（目前只有 1.21.10 和 26.3）", ver=ver))
     cp, why = game_classpath(ver)
     if not cp:
-        return False, "没找到 out/findstruct（包里自带的引擎），" + why
+        return False, _("没找到 out/findstruct（包里自带的引擎），") + why
     return True, ""
 
 
@@ -298,13 +303,13 @@ def engine_predict(seed, cities, timeout=300, jobs=None):
             r = subprocess.run(_ship_cmd(path, seed, cities), capture_output=True,
                                encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired:
-            return None, "引擎算超时了（城市太多？把半径调小一点）"
+            return None, _("引擎算超时了（城市太多？把半径调小一点）")
         except OSError as e:
-            return None, f"引擎跑不起来（{e}）"
+            return None, _("引擎跑不起来（{err}）", err=e)
         text = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0 or not text.strip():
             first = next((ln for ln in text.splitlines() if ln.strip()), "")
-            return None, "引擎没给出结果" + (f"：{first[:120]}" if first else "")
+            return None, _("引擎没给出结果") + (f"：{first[:120]}" if first else "")
         return _parse_city_lines(text), None
 
     procs = []
@@ -325,7 +330,7 @@ def engine_predict(seed, cities, timeout=300, jobs=None):
                 p.wait(timeout=remain)
                 out_fh.close()
                 if p.returncode != 0:
-                    raise OSError(f"子进程退出码 {p.returncode}")
+                    raise OSError(_("子进程退出码 {code}", code=p.returncode))
                 with open(out_path, encoding="utf-8", errors="replace") as f:
                     parts.append(f.read())
             text = "".join(parts)
@@ -333,14 +338,14 @@ def engine_predict(seed, cities, timeout=300, jobs=None):
         for p, *_rest in procs:
             if p.poll() is None:
                 p.kill()
-        return None, "引擎算超时了（城市太多？把半径调小一点）"
+        return None, _("引擎算超时了（城市太多？把半径调小一点）")
     except OSError as e:
         for p, *_rest in procs:
             if p.poll() is None:
                 p.kill()
-        return None, f"引擎跑不起来（{e}）"
+        return None, _("引擎跑不起来（{err}）", err=e)
     if not text.strip():
-        return None, "引擎没给出结果"
+        return None, _("引擎没给出结果")
     return _parse_city_lines(text), None
 
 
@@ -358,15 +363,17 @@ def predict(seed, cities, mcver=None, java=None, timeout=900):
     # ② 引擎不在（或者坏了）才退回"跑游戏本体那套"
     vd = variant_for(mcver)
     if not vd:
-        return [], f"{why}；退路（跑游戏本体）也没编 {mcver} 这一版（目前只有 1.21.10 和 26.3）"
+        return [], (f"{why}" + _("；退路（跑游戏本体）也没编 ") + f"{mcver} "
+                    + _("这一版（目前只有 1.21.10 和 26.3）"))
     classdir, tag, java_min = vd
     java = java or find_java_for(java_min)
     if not java:
-        return [], "没有能用的 Java"
+        return [], _("没有能用的 Java")
     major = cfgmod.check_java(java) or 0
     if major < java_min:
-        return [], (f"{tag} 这版预测器要 Java {java_min}+（现在这个是 Java {major}）—— "
-                    f"装过 26.x 的话启动器里会自带 Java 25，路径在 .minecraft\\runtime\\ 下面")
+        return [], (f"{tag} " + _("这版预测器要 Java {need}+（现在这个是 Java {have}）—— ",
+                                  need=java_min, have=major)
+                    + _("装过 26.x 的话启动器里会自带 Java 25，路径在 .minecraft\\runtime\\ 下面"))
     cp, why = game_classpath(mcver, want=("fabric" if tag == "1.21.10" else "official"))
     if not cp:
         return [], why
@@ -383,7 +390,7 @@ def predict(seed, cities, mcver=None, java=None, timeout=900):
                            errors="replace", timeout=timeout)
         text = (r.stdout or "") + (r.stderr or "")
     except subprocess.TimeoutExpired:
-        return [], "算超时了（城市太多？把半径调小一点）"
+        return [], _("算超时了（城市太多？把半径调小一点）")
     finally:
         try:
             os.remove(listfile)

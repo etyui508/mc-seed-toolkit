@@ -152,20 +152,46 @@ CLR = "\x1b[2K"                # 清掉整行（交互菜单重画用）
 CLEAR_LINE = "\r" + CLR        # 回到行首 + 清掉（进度条原地刷新用）
 
 
-def console():
-    """真正的终端输出。
+_CONSOLE_CACHE = []
 
-    为什么要单独找它：跑慢活儿时工具会用 contextlib.redirect_stdout 把输出
-    重定向到内存里（好把结果同时写进日志）。那时候 sys.stdout 已经变成字符串
-    缓冲区了 —— 转圈动画要是还往那儿写，就会被关进缓冲区，跑的时候屏幕上
-    什么都不显示，跑完再一口气全糊出来。所以动画要往 sys.__stdout__ 写。
+
+def console():
+    """真正的终端输出（动画专用）。按三个地方依次找：
+
+    1) sys.__stdout__ —— 正常双击 START.bat 跑起来时就是控制台；
+    2) Windows 的 CONOUT$ —— 输出被启动器/PCL 接走时 stdout 成了管道，但控制台
+       本身还在，直接打开这个设备就能写上去；
+    3) Linux/macOS 的 /dev/tty —— 同上，POSIX 下走控制终端。
+
+    为什么要绕这一圈：跑慢活儿时工具会用 contextlib.redirect_stdout 把输出
+    重定向到内存（好把结果同时写进日志），动画要是跟着进去，就会"跑的时候
+    什么都没显示、跑完一口气全糊出来"。
     """
-    out = getattr(sys, "__stdout__", None)
+    if _CONSOLE_CACHE:
+        return _CONSOLE_CACHE[0]
+    out = None
     try:
-        out.write("")
-        return out
+        candidate = getattr(sys, "__stdout__", None)
+        if candidate is not None:
+            candidate.write("")
+            if _isatty(candidate):
+                out = candidate
     except Exception:
-        return None
+        pass
+    if out is None and os.name == "nt":
+        try:
+            handle = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)
+            out = handle
+        except Exception:
+            out = None
+    if out is None and os.name != "nt":
+        try:
+            handle = open("/dev/tty", "w", encoding="utf-8", errors="replace", buffering=1)
+            out = handle
+        except Exception:
+            out = None
+    _CONSOLE_CACHE.append(out)
+    return out
 
 
 def init_console():
@@ -174,11 +200,34 @@ def init_console():
     输出被接到管道/启动器里时，Python 默认会攒够一大块才写出去，
     于是用户看到的是"卡半天，然后一口气全出来"。这里打开行缓冲。
     """
+    global _CONSOLE_KIND
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(line_buffering=True, write_through=True)
         except Exception:
             pass
+    # 顺手记一下"动画到底能画到哪儿"，排查用（也进反馈包）
+    try:
+        probe = getattr(sys, "__stdout__", None)
+        if probe is not None and _isatty(probe):
+            _CONSOLE_KIND = "stdout"
+        elif console():
+            _CONSOLE_KIND = "CONOUT$" if os.name == "nt" else "/dev/tty"
+        else:
+            _CONSOLE_KIND = _("无（输出被接走了，画不了动画）")
+    except Exception:
+        _CONSOLE_KIND = "?"
+
+
+_CONSOLE_KIND = None
+
+
+def console_report():
+    """一行说明动画的情况，出问题时让人贴出来就能定位"""
+    kind = _CONSOLE_KIND or _("（还没探测）")
+    return (_("TTY={tty} ANSI={ansi} 动画画到={kind}", tty=TTY, ansi=ANSI, kind=kind) + " "
+            f"stdout.isatty={_isatty(sys.stdout)} "
+            f"__stdout__.isatty={_isatty(getattr(sys, '__stdout__', None))}")
 
 # 统一配色，想换风格只动这里
 STYLES = {
@@ -592,7 +641,7 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
         """把动画占掉的那几行擦干净，让正式界面从顶上来"""
         rows = len(drawn) + 1                       # +1：当前正在写的那一行
         up(rows)
-        for _ in range(rows):
+        for _i in range(rows):
             sys.stdout.write(CLR + "\n")
         up(rows)
         sys.stdout.flush()
@@ -660,6 +709,9 @@ def intro(version="", subtitle="", width=None, enabled=None, status=None, steps=
 
 
 # ---------------------------------------------------------------- 转圈
+_ACTIVE_SPINNER = []        # 正在画的那个（嵌套时只换文案，不叠着画）
+
+
 class _Spinner:
     """跑慢活儿的时候转个圈 + 显示已用时间。
 
@@ -675,6 +727,7 @@ class _Spinner:
 
     def __init__(self, text="", delay=0.35):
         self.text = text or _("正在算")
+        self._nested = False
         self.delay = delay          # 一眨眼就完事的活儿别闪一下动画
         self._out = console()
         self._term = bool(self._out) and _isatty(self._out)
@@ -683,9 +736,16 @@ class _Spinner:
         self._thread = None
 
     def __enter__(self):
+        # 已经有一个动画在画了（比如外层"正在算"里又套了个具体的扫描）：
+        # 只把文案更新成更具体的那句，别两个线程抢同一行
+        if _ACTIVE_SPINNER:
+            _ACTIVE_SPINNER[0].text = self.text
+            self._nested = True
+            return self
         if not self._out:
             return self
         import threading
+        _ACTIVE_SPINNER.append(self)
         self._stop = threading.Event()
         stop = self._stop
 
@@ -725,6 +785,10 @@ class _Spinner:
         return self
 
     def __exit__(self, *exc):
+        if self._nested:
+            return False
+        if _ACTIVE_SPINNER and _ACTIVE_SPINNER[0] is self:
+            _ACTIVE_SPINNER.pop()
         if self._stop:
             self._stop.set()
             if self._thread:

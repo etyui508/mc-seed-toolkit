@@ -8,7 +8,7 @@ import engine
 from .base import Structure
 
 def run_cli(args):
-    hits, _ = engine.run_find(0, 0, 45000, 4000, args.min_dist, nobiome=True)
+    hits, _extra = engine.run_find(0, 0, 45000, 4000, args.min_dist, nobiome=True)
     cities = []
     for name, items in hits.items():
         if "末地城" in name:

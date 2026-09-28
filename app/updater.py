@@ -36,6 +36,11 @@ try:
 except ImportError:
     release = None
 
+import i18n
+
+# 更新流程里给用户看的提示都过一遍语言表（查不到就原样显示中文）
+_ = i18n.t
+
 HERE = os.path.dirname(os.path.abspath(__file__))          # app/
 ROOT = os.path.dirname(HERE)                               # 工具包根目录
 VERSION_FILE = os.path.join(HERE, "VERSION")
@@ -243,7 +248,7 @@ def fetch_manifest():
         if isinstance(out.get(u), dict):
             return out[u], u
     errs = [out[u] for u in urls if isinstance(out.get(u), Exception)]
-    raise errs[0] if errs else RuntimeError("没有可用的更新地址")
+    raise errs[0] if errs else RuntimeError(_("没有可用的更新地址"))
 
 
 def _fresh_url(url):
@@ -263,30 +268,30 @@ def check_url(url):
     from urllib.parse import urlparse
     u = urlparse(url)
     if u.scheme != "https":
-        raise ValueError(f"更新地址必须是 https（现在是 {u.scheme or '空'}）")
+        raise ValueError(_("更新地址必须是 https（现在是 {scheme}）", scheme=u.scheme or "空"))
     if ALLOWED_HOSTS and u.hostname not in ALLOWED_HOSTS:
-        raise ValueError(f"更新地址不是我们认可的域名：{u.hostname}")
+        raise ValueError(_("更新地址不是我们认可的域名：{host}", host=u.hostname))
     if u.port not in (None, 443):
-        raise ValueError(f"更新地址带了奇怪的端口：{u.port}")
+        raise ValueError(_("更新地址带了奇怪的端口：{port}", port=u.port))
     if u.username or u.password:
-        raise ValueError("更新地址里塞了用户名/密码，不对劲")
+        raise ValueError(_("更新地址里塞了用户名/密码，不对劲"))
     return True
 
 
 def verify_release(man):
     """验签 + 校验清单内容。返回 (是否可信, 说明)"""
     if release is None:
-        return False, "客户端里没有签名校验模块（release.py 丢了？）"
+        return False, _("客户端里没有签名校验模块（release.py 丢了？）")
     ok, why = release.verify_manifest(man)
     if not ok:
         return False, why
     if str(man.get("name")) != "mc-seed-toolkit":
-        return False, f'清单里的名字不对：{man.get("name")!r}'
+        return False, _("清单里的名字不对：{name}", name=repr(man.get("name")))
     if not str(man.get("version") or "").strip():
-        return False, "清单里没有版本号"
+        return False, _("清单里没有版本号")
     for field in ("url", "sha256", "size"):
         if not man.get(field):
-            return False, f"清单里缺少 {field}"
+            return False, _("清单里缺少 {field}", field=field)
     # 下载地址也要过白名单；备用地址（自己的域名）同理，不然主站被墙时等于把用户往别人家送
     for field in ("url", "url_backup"):
         if not man.get(field):
@@ -294,8 +299,8 @@ def verify_release(man):
         try:
             check_url(str(man[field]))
         except ValueError as e:
-            return False, f"{field} 不安全：{e}"
-    return True, "签名有效"
+            return False, _("{field} 不安全：{err}", field=field, err=e)
+    return True, _("签名有效")
 
 
 def _agent():
@@ -316,9 +321,10 @@ def _open(url, timeout=None, headers=None):
             urllib.request.Request(url, headers=headers), timeout=timeout or TIMEOUT)
 
 
-def progress_printer(label="下载更新包"):
+def progress_printer(label=None):
     """给下载过程挂个进度：每 0.3 秒刷一行。不是终端就不刷 —— 日志里保持干净。
     （调试/自动化想留痕的话设 MC_UPDATE_PROGRESS=1）"""
+    label = label or _("下载更新包")
     state = {"t": 0.0, "done": False}
 
     def show(got, total):
@@ -381,7 +387,7 @@ def download(url, dest, expect_sha256=None, expect_size=None, on_progress=None,
             last = e
         if i < attempts:
             time.sleep(1.5)               # 喘口气，然后从断点接着下
-    raise last if last else RuntimeError("下载没成")
+    raise last if last else RuntimeError(_("下载没成"))
 
 
 def _download_once(url, dest, expect_sha256=None, expect_size=None, on_progress=None,
@@ -426,10 +432,11 @@ def _download_once(url, dest, expect_sha256=None, expect_size=None, on_progress=
             if on_progress:
                 on_progress(got, expect_size)
     if expect_size and got != int(expect_size):
-        raise RuntimeError(f"大小对不上（收到 {got}，清单说应该是 {expect_size}）"
-                           f"—— 可能是下载站的缓存还没过期，过几分钟再试一次")
+        raise RuntimeError(_("大小对不上（收到 {got}，清单说应该是 {want}）"
+                             "—— 可能是下载站的缓存还没过期，过几分钟再试一次",
+                             got=got, want=expect_size))
     if expect_sha256 and h.hexdigest().lower() != str(expect_sha256).lower():
-        raise RuntimeError("sha256 校验失败（下载不完整或者线上文件被换过）")
+        raise RuntimeError(_("sha256 校验失败（下载不完整或者线上文件被换过）"))
     return got
 
 
@@ -444,7 +451,7 @@ def download_with_fallback(primary, dest, backup=None, expect_sha256=None,
     urls = [u for u in (primary, backup) if u]
     if backup and backup == primary:
         urls = [primary]
-    names = {primary: "主站（GitHub）", backup: "备用站（自己的域名）"}
+    names = {primary: _("主站（GitHub）"), backup: _("备用站（自己的域名）")}
     fails = []
     for i, url in enumerate(urls):
         for attempt in range(1, max(1, tries) + 1):
@@ -454,9 +461,10 @@ def download_with_fallback(primary, dest, backup=None, expect_sha256=None,
             except Exception as e:
                 fails.append(f"{names.get(url, url)}：{e}")
                 if verbose:
-                    print(f"  ⚠ {names.get(url, url)} 第 {attempt} 次没下来：{e}")
+                    print(_("  ⚠ {name} 第 {attempt} 次没下来：{err}",
+                            name=names.get(url, url), attempt=attempt, err=e))
                 if attempt < tries and verbose:
-                    print("    接着试（已下的部分会续上，不白下）…")
+                    print(_("    接着试（已下的部分会续上，不白下）…"))
         if i + 1 < len(urls):
             if os.path.exists(dest):
                 try:
@@ -464,8 +472,8 @@ def download_with_fallback(primary, dest, backup=None, expect_sha256=None,
                 except OSError:
                     pass
             if verbose:
-                print("    换备用站（自己的域名）再试一次…")
-    raise RuntimeError("这次没下下来 —— " + "；".join(fails))
+                print(_("    换备用站（自己的域名）再试一次…"))
+    raise RuntimeError(_("这次没下下来 —— {fails}", fails="；".join(fails)))
 
 
 # ------------------------------------------------------------------ 解压覆盖
@@ -499,7 +507,7 @@ def apply_zip(zip_path, verbose=True):
         top = _top_dir(names)
         src = os.path.join(tmp, top) if top else tmp
         if not os.path.isfile(os.path.join(src, "app", "tool.py")):
-            raise RuntimeError("这个包里没有 app/tool.py，不像工具包，先不动")
+            raise RuntimeError(_("这个包里没有 app/tool.py，不像工具包，先不动"))
 
         backup = os.path.join(BACKUP_DIR, local_version())
         for dirpath, dirnames, filenames in os.walk(src):
@@ -527,7 +535,8 @@ def apply_zip(zip_path, verbose=True):
                     result["failed"].append((rel, why))
         _purge_pycache()
         if verbose:
-            print(f"（替换 {result['changed']} 个文件，跳过 {result['skipped']} 个没变的）")
+            print(_("（替换 {changed} 个文件，跳过 {skipped} 个没变的）",
+                    changed=result["changed"], skipped=result["skipped"]))
         return result
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -577,11 +586,11 @@ def _explain(err):
     """把 OSError 翻译成人话（Windows 的占用错误码单独说）"""
     code = getattr(err, "winerror", None)
     if code in (5, 32) or (code is None and isinstance(err, PermissionError)):
-        return "文件被占用（可能有程序正开着它，或有杀毒软件在扫）"
+        return _("文件被占用（可能有程序正开着它，或有杀毒软件在扫）")
     if isinstance(err, PermissionError):
-        return "没有写权限（目录只读？U 盘写保护？）"
+        return _("没有写权限（目录只读？U 盘写保护？）")
     if isinstance(err, FileNotFoundError):
-        return "路径不见了"
+        return _("路径不见了")
     return f"{type(err).__name__}: {err}"
 
 
@@ -693,14 +702,16 @@ def plan(man):
 def describe(p, limit=8):
     """把差异写成人看的一行行"""
     if p is None:
-        return ["（这份清单没带文件列表，只能整个覆盖一遍）"]
-    out = [f"这次更新：改 {len(p['changed'])} 个、新增 {len(p['added'])} 个、"
-           f"废弃 {len(p['gone'])} 个，其余 {p['same']} 个文件没动"]
-    for tag, items in (("改", p["changed"]), ("新", p["added"]), ("删", p["gone"])):
+        return [_("（这份清单没带文件列表，只能整个覆盖一遍）")]
+    out = [_("这次更新：改 {changed} 个、新增 {added} 个、"
+             "废弃 {gone} 个，其余 {same} 个文件没动",
+             changed=len(p["changed"]), added=len(p["added"]),
+             gone=len(p["gone"]), same=p["same"])]
+    for tag, items in ((_("改"), p["changed"]), (_("新"), p["added"]), (_("删"), p["gone"])):
         for rel in items[:limit]:
             out.append(f"  {tag}  {rel}")
         if len(items) > limit:
-            out.append(f"  {tag}  …还有 {len(items) - limit} 个")
+            out.append(f"  {tag}  " + _("…还有 {n} 个", n=len(items) - limit))
     return out
 
 
@@ -739,8 +750,9 @@ def file_diffs(zip_path, only_text_limit=400):
                 except (OSError, UnicodeDecodeError):
                     binary = True                # 新文件，或者二进制（jar/exe）
                 if binary:
-                    stats.append((rel, None, None, "二进制" if os.path.exists(old_path) else "新增"))
-                    full.append(f"=== {rel} ===\n（二进制或新文件，不比内容）\n")
+                    stats.append((rel, None, None,
+                                  _("二进制") if os.path.exists(old_path) else _("新增")))
+                    full.append(f"=== {rel} ===\n" + _("（二进制或新文件，不比内容）") + "\n")
                     continue
                 diff = list(difflib.unified_diff(
                     old_lines, new_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm=""))
@@ -788,7 +800,7 @@ def _report_diffs(zip_path, old_ver, new_ver):
     try:
         stats, full = file_diffs(zip_path)
     except Exception as e:
-        print(f"  （算差异的时候出错了：{e}）")
+        print(_("  （算差异的时候出错了：{err}）", err=e))
         return
     if not stats:
         return
@@ -803,7 +815,7 @@ def _report_diffs(zip_path, old_ver, new_ver):
     text = sorted([s for s in stats if s[1] is not None], key=rank)
     binary = sorted([s for s in stats if s[1] is None], key=rank)
     both = text + binary
-    print(f"  代码差异（{len(both)} 个文件）：")
+    print(_("  代码差异（{n} 个文件）：", n=len(both)))
     shown = 0
     for rel, plus, minus, kind in both:
         if plus is None or shown >= 15:
@@ -811,17 +823,18 @@ def _report_diffs(zip_path, old_ver, new_ver):
         print(f"    {rel}   +{plus} -{minus}")
         shown += 1
     if len(text) > shown:
-        print(f"    …还有 {len(text) - shown} 个代码文件")
+        print(_("    …还有 {n} 个代码文件", n=len(text) - shown))
     if binary:
         kinds = {}
         for _rel, _p, _m, kind in binary:
             kinds[kind] = kinds.get(kind, 0) + 1
-        detail = "、".join(f"{k} {v} 个" for k, v in kinds.items())
+        detail = "、".join(_("{kind} {n} 个", kind=k, n=v) for k, v in kinds.items())
         names = "、".join(os.path.basename(r) for r, *_ in binary[:3])
-        print(f"    （另有 {detail}：{names}{'…' if len(binary) > 3 else ''}）")
+        print(_("    （另有 {detail}：{names}）",
+                detail=detail, names=names + ("…" if len(binary) > 3 else "")))
     path = save_diff(full, old_ver, new_ver)
     if path:
-        print(f"    完整 diff：记录/更新日志/{os.path.basename(path)}")
+        print(_("    完整 diff：记录/更新日志/{name}", name=os.path.basename(path)))
 
 
 # ---------------------------------------------------------------- 回滚
@@ -852,7 +865,7 @@ def rollback(version, verbose=True):
     """
     src = os.path.join(BACKUP_DIR, version)
     if not os.path.isdir(src):
-        return False, f"没有 {version} 的备份"
+        return False, _("没有 {version} 的备份", version=version)
     restored, failed = 0, []
 
     def put(rel, from_path):
@@ -886,11 +899,11 @@ def rollback(version, verbose=True):
             put(rel, os.path.join(root, name))
 
     if verbose:
-        print(f"  （放回 {restored} 个文件）")
+        print(_("  （放回 {n} 个文件）", n=restored))
     if failed:
         head = "；".join(f"{r}：{w}" for r, w in failed[:3])
-        return False, f"有 {len(failed)} 个文件没放回去：{head}"
-    return True, f"已回滚到 {version}（重启一下工具就是那个版本）"
+        return False, _("有 {n} 个文件没放回去：{head}", n=len(failed), head=head)
+    return True, _("已回滚到 {version}（重启一下工具就是那个版本）", version=version)
 
 
 # ------------------------------------------------------------------ 对外接口
@@ -901,23 +914,25 @@ def check():
         man, _src = fetch_manifest()
     except urllib.error.HTTPError as e:
         if e.code == 404 and channel() != DEFAULT_CHANNEL:
-            return None, f"这个通道还没有发布过（{CHANNEL_NAMES[channel()]}）"
-        return None, f"连不上下载站（HTTP {e.code}）"
+            return None, _("这个通道还没有发布过（{channel}）",
+                           channel=_(CHANNEL_NAMES[channel()]))
+        return None, _("连不上下载站（HTTP {code}）", code=e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
-        return None, f"连不上下载站（{e}）"
+        return None, _("连不上下载站（{err}）", err=e)
     trust, why = verify_release(man)
     if not trust and not ALLOW_UNSIGNED:
-        return None, (f"⚠⚠ 清单签名校验没过：{why}\n"
-                      f"     这次不更新。如果不是你自己在调试，说明下载站可能被人动了手脚，"
-                      f"先别用更新，去群里问一下。")
+        return None, (_("⚠⚠ 清单签名校验没过：{why}\n"
+                        "     这次不更新。如果不是你自己在调试，说明下载站可能被人动了手脚，"
+                        "先别用更新，去群里问一下。", why=why))
     if not trust:
-        print("  ⚠ 正在用 MC_UPDATE_ALLOW_UNSIGNED=1 跳过签名校验（只有调试该这么干）")
+        print(_("  ⚠ 正在用 MC_UPDATE_ALLOW_UNSIGNED=1 跳过签名校验（只有调试该这么干）"))
     remote = str(man.get("version") or "").strip()
     if not remote:
-        return None, "线上的 manifest 里没有版本号"
+        return None, _("线上的 manifest 里没有版本号")
     if not is_newer(remote, local):
-        return None, f"已经是最新的（本地 {local}，线上 {remote}）"
-    return man, f"有新版本：本地 {local} -> 线上 {remote}"
+        return None, _("已经是最新的（本地 {local}，线上 {remote}）",
+                       local=local, remote=remote)
+    return man, _("有新版本：本地 {local} -> 线上 {remote}", local=local, remote=remote)
 
 
 def update(force=False, verbose=True):
@@ -928,23 +943,23 @@ def update(force=False, verbose=True):
     except urllib.error.HTTPError as e:
         if e.code == 404 and channel() != DEFAULT_CHANNEL:
             return False, ""              # 测试版通道还没发过东西：安静点，别每次启动都念
-        return False, f"连不上下载站，跳过更新（HTTP {e.code}）"
+        return False, _("连不上下载站，跳过更新（HTTP {code}）", code=e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
-        return False, f"连不上下载站，跳过更新（{e}）"
+        return False, _("连不上下载站，跳过更新（{err}）", err=e)
 
     remote = str(man.get("version") or "").strip()
     if not remote:
-        return False, "线上的 manifest 里没有版本号，跳过"
+        return False, _("线上的 manifest 里没有版本号，跳过")
     if not force and not is_newer(remote, local):
         return False, ""                      # 静默：平时就该这么安静
 
     # 签名没过的包，一律不下载、不解压、不替换
     trust, why = verify_release(man)
     if not trust and not ALLOW_UNSIGNED:
-        return False, (f"⚠⚠ 清单签名校验没过：{why} —— 已拒绝更新。\n"
-                       f"     可能是下载站被篡改了，先别更新，去群里问一下。")
+        return False, _("⚠⚠ 清单签名校验没过：{why} —— 已拒绝更新。\n"
+                        "     可能是下载站被篡改了，先别更新，去群里问一下。", why=why)
     if not trust:
-        print("  ⚠ 正在用 MC_UPDATE_ALLOW_UNSIGNED=1 跳过签名校验（只有调试该这么干）")
+        print(_("  ⚠ 正在用 MC_UPDATE_ALLOW_UNSIGNED=1 跳过签名校验（只有调试该这么干）"))
 
     # 主地址（GitHub）+ 备用地址（自己的域名）。清单里地址不合法的一律不要。
     primary = str(man.get("url") or "").strip()
@@ -958,11 +973,11 @@ def update(force=False, verbose=True):
             check_url(value)
         except ValueError as e:
             if field == "url":
-                return False, f"下载地址不安全：{e}"
-            print(f"  ⚠ 备用地址不安全，这次不用它：{e}")
+                return False, _("下载地址不安全：{err}", err=e)
+            print(_("  ⚠ 备用地址不安全，这次不用它：{err}", err=e))
             backup = ""
     if not primary or primary.endswith("/"):
-        return False, "manifest 里没写下载地址，跳过"
+        return False, _("manifest 里没写下载地址，跳过")
     if backup == primary:
         backup = ""
 
@@ -971,12 +986,13 @@ def update(force=False, verbose=True):
     if backup and src and BASE_URL in src:
         primary, backup = backup, primary
         if verbose:
-            print("  （刚才清单是从备用站拿的，包也从备用站下）")
+            print(_("  （刚才清单是从备用站拿的，包也从备用站下）"))
 
     if verbose:
         size = man.get("size")
-        size_text = f"，{size / 1024 / 1024:.1f} MB" if size else ""
-        print(f"发现新版本 {local} → {remote}{size_text}，正在自动更新…")
+        size_text = _("，{mb:.1f} MB", mb=size / 1024 / 1024) if size else ""
+        print(_("发现新版本 {local} → {remote}{size_text}，正在自动更新…",
+                local=local, remote=remote, size_text=size_text))
         # 下载前先把差异说清楚（靠清单里的文件哈希，不用先下包）
         plan_now = plan(man)
         for line in describe(plan_now):
@@ -984,7 +1000,7 @@ def update(force=False, verbose=True):
 
     can_write, why = _preflight()
     if not can_write:
-        return False, f"这个目录现在写不进去（{why}），跳过更新"
+        return False, _("这个目录现在写不进去（{why}），跳过更新", why=why)
 
     tmp_zip = os.path.join(tempfile.gettempdir(), f"mc-update-{remote}.zip")
     try:
@@ -995,7 +1011,7 @@ def update(force=False, verbose=True):
             _report_diffs(tmp_zip, local, remote)
         result = apply_zip(tmp_zip, verbose=verbose)
     except Exception as e:
-        return False, f"更新失败：{e}（这次就先按旧版本跑）"
+        return False, _("更新失败：{err}（这次就先按旧版本跑）", err=e)
     finally:
         try:
             os.remove(tmp_zip)
@@ -1009,7 +1025,8 @@ def update(force=False, verbose=True):
     if gone:
         moved = remove_obsolete(gone, remote)
         if moved and verbose:
-            print(f"  （清掉 {moved} 个废弃文件，旧的放在 记录/.update-backup/{remote}/废弃/）")
+            print(_("  （清掉 {n} 个废弃文件，旧的放在 记录/.update-backup/{version}/废弃/）",
+                    n=moved, version=remote))
     if man.get("files"):
         _save_managed(man["files"], remote)
 
@@ -1020,9 +1037,10 @@ def update(force=False, verbose=True):
 
     if critical:
         lines = "；".join(f"{rel}：{why}" for rel, why in critical[:3])
-        more = f"（还有 {len(critical) - 3} 个）" if len(critical) > 3 else ""
-        return False, (f"有 {len(critical)} 个关键文件没换成 —— {lines}{more}。"
-                       f"先按旧版本跑，下次启动会自动重试")
+        more = _("（还有 {n} 个）", n=len(critical) - 3) if len(critical) > 3 else ""
+        return False, _("有 {n} 个关键文件没换成 —— {lines}{more}。"
+                        "先按旧版本跑，下次启动会自动重试",
+                        n=len(critical), lines=lines, more=more)
 
     if minor:
         print(ui_warn_minor(minor))
@@ -1032,7 +1050,7 @@ def update(force=False, verbose=True):
             fh.write(remote + "\n")
     except OSError:
         pass
-    return True, f"已更新到 {remote}（重启一下工具就是新版）"
+    return True, _("已更新到 {version}（重启一下工具就是新版）", version=remote)
 
 
 def _is_critical(rel):
@@ -1043,8 +1061,9 @@ def _is_critical(rel):
 def ui_warn_minor(minor):
     """非关键文件没换上的提醒（比如 out/findstruct.exe 还在被占用）"""
     head = "；".join(f"{rel}：{why}" for rel, why in minor[:3])
-    more = f"（还有 {len(minor) - 3} 个）" if len(minor) > 3 else ""
-    return f"  ⚠ {len(minor)} 个非关键文件没换成：{head}{more} —— 不影响用，下次启动会再试"
+    more = _("（还有 {n} 个）", n=len(minor) - 3) if len(minor) > 3 else ""
+    return _("  ⚠ {n} 个非关键文件没换成：{head}{more} —— 不影响用，下次启动会再试",
+             n=len(minor), head=head, more=more)
 
 
 def maybe_update():
@@ -1088,11 +1107,11 @@ def restart_into_new_version():
         return False
     os.environ["MC_JUST_RESTARTED"] = "1"
     try:
-        print("  正在用新版重启…")
+        print(_("  正在用新版重启…"))
         sys.stdout.flush()
         os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception as e:
-        print(f"  （自动重启没成：{e}，手动关掉再开一次就行）")
+        print(_("  （自动重启没成：{err}，手动关掉再开一次就行）", err=e))
         return False
 
 
@@ -1101,18 +1120,18 @@ def main():
     local = local_version()
     if force:
         changed, msg = update(force=True)
-        print(msg or "没有更新")
+        print(msg or _("没有更新"))
         return
     man, msg = check()
-    print(f"本地版本：{local}")
+    print(_("本地版本：{version}", version=local))
     print(msg)
     if man:
-        print(f"下载地址：{man.get('url') or man.get('zip')}")
+        print(_("下载地址：{url}", url=man.get('url') or man.get('zip')))
         if man.get("notes"):
-            print(f"更新说明：{man['notes']}")
-        if input("现在就更新吗？ [Y/n]: ").strip().lower() != "n":
+            print(_("更新说明：{notes}", notes=man["notes"]))
+        if input(_("现在就更新吗？ [Y/n]: ")).strip().lower() != "n":
             changed, m = update(verbose=True)
-            print(m or "没有更新")
+            print(m or _("没有更新"))
 
 
 if __name__ == "__main__":

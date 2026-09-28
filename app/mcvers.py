@@ -31,6 +31,10 @@
 """
 import re
 
+# 界面文字走语言表；查不到就原样显示中文（这个模块的 note / 汇总行都会打到屏幕上）
+import i18n
+_ = i18n.t
+
 # 菜单里列出来的代表性版本（想用别的版本直接手输版本号即可）
 MILESTONES = [
     "26.4-snapshot-1", "26.3", "26.2", "26.1.2", "26.1",
@@ -74,7 +78,7 @@ def features(ver):
     f = {"pillars": False, "struct": False, "hash": False,
          "cubiomes": "none", "ship": False, "note": ""}
     if not p:
-        f["note"] = "版本号没看懂"
+        f["note"] = _("版本号没看懂")
         return f
     new = _new_naming(ver)
     # ① 末地柱子：1.9 起（26.x 当然也有）
@@ -86,14 +90,14 @@ def features(ver):
     # cubiomes 的 worldgen 支持范围（能不能做群系检查 / 找结构）
     if new:
         f["cubiomes"] = "none"
-        f["note"] = ("cubiomes 还不支持 26.x 的世界生成 → 结构计算只能按 1.21 近似列候选；"
-                     "但破解种子不受影响（摆放算法是自己实现的）")
+        f["note"] = _("cubiomes 还不支持 26.x 的世界生成 → 结构计算只能按 1.21 近似列候选；"
+                                "但破解种子不受影响（摆放算法是自己实现的）")
         f["cubiomes_ver"] = "1.21"
     elif _ge(ver, 1, 21):
         f["cubiomes"] = "approx"          # 1.21.2+ 按 1.21 算
         f["cubiomes_ver"] = "1.21"
         if not _ge(ver, 1, 21) or p > (1, 21):
-            f["note"] = "cubiomes 最新只到 1.21，这里按 1.21 近似（实测位置仍然对得上）"
+            f["note"] = _("cubiomes 最新只到 1.21，这里按 1.21 近似（实测位置仍然对得上）")
     elif _ge(ver, 1, 7):
         f["cubiomes"] = "exact"
         f["cubiomes_ver"] = ver
@@ -103,12 +107,12 @@ def features(ver):
     # ④ 结构参数分版本：这几处的"盐/间距"在 1.18 改过，
     #    本工具的参数表是按 1.18+ 那套写的，老版本会算偏。
     if not new and p and p < (1, 18):
-        old_note = ("1.17 及以前：村庄、下界废弃传送门、沙漠水井、紫水晶洞、"
-                    "末地折跃门、末地小岛的摆放参数和现在不一样 —— 这几种结构"
-                    "算出来的位置会偏，别的结构不受影响（种子本身也能正常解出）")
+        old_note = _("1.17 及以前：村庄、下界废弃传送门、沙漠水井、紫水晶洞、"
+                             "末地折跃门、末地小岛的摆放参数和现在不一样 —— 这几种结构"
+                             "算出来的位置会偏，别的结构不受影响（种子本身也能正常解出）")
         f["note"] = (f["note"] + "；" + old_note) if f.get("note") else old_note
-        f["struct_partial"] = ["村庄", "废弃传送门(下界)", "沙漠水井",
-                               "紫水晶洞", "末地折跃门", "末地小岛"]
+        f["struct_partial"] = [_("村庄"), _("废弃传送门(下界)"), _("沙漠水井"),
+                               _("紫水晶洞"), _("末地折跃门"), _("末地小岛")]
     return f
 
 
@@ -116,15 +120,15 @@ def summary_line(ver):
     """一行说明这个版本的支持情况"""
     f = features(ver)
     if not parse(ver):
-        return f"  {ver}：版本号没看懂"
+        return _("  {ver}：版本号没看懂", ver=ver)
     bits = []
-    bits.append("柱子✓" if f["pillars"] else "柱子✗")
-    bits.append("结构✓" if f["struct"] else "结构✗(老算法)")
-    bits.append("哈希✓" if f["hash"] else "哈希✗")
-    cube = {"exact": "世界生成✓", "approx": "世界生成≈1.21", "none": "世界生成✗"}[f["cubiomes"]]
+    bits.append(_("柱子✓") if f["pillars"] else _("柱子✗"))
+    bits.append(_("结构✓") if f["struct"] else _("结构✗(老算法)"))
+    bits.append(_("哈希✓") if f["hash"] else _("哈希✗"))
+    cube = _({"exact": "世界生成✓", "approx": "世界生成≈1.21", "none": "世界生成✗"}[f["cubiomes"]])
     bits.append(cube)
     if f["ship"]:
-        bits.append("末地船✓")
+        bits.append(_("末地船✓"))
     return f"  {ver:16s} " + "  ".join(bits)
 
 
@@ -137,6 +141,6 @@ def cubiomes_version(ver):
 
 
 if __name__ == "__main__":
-    print("版本支持表（1.9 ~ 26.3）：")
+    print(_("版本支持表（1.9 ~ 26.3）："))
     for v in MILESTONES:
         print(summary_line(v))

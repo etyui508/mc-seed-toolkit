@@ -512,6 +512,17 @@ def test_spinner():
     check("strip_progress 不动正常文本",
           engine.strip_progress("第一行\n第二行\n") == "第一行\n第二行\n")
 
+    # 光有动画还不够：以前只有走 findstruct 的查询有动画，矿石分布/扫存档这些
+    # 是干等着。现在 run_and_log 外面统一套了一层，所以每个慢查询都有进度。
+    import inspect
+    check("每个慢查询都套了动画（run_and_log 那层）",
+          "ui.spinner" in inspect.getsource(engine.run_and_log))
+    src = inspect.getsource(ui.console)
+    check("动画有兜底出口（输出被接走时走 CONOUT$ / /dev/tty）",
+          "CONOUT$" in src and "/dev/tty" in src)
+    check("嵌套的动画不会互相抢同一行（可重入）",
+          hasattr(ui, "_ACTIVE_SPINNER"))
+
 
 def test_i18n():
     section("界面多语言（中英文）")
@@ -547,6 +558,59 @@ def test_i18n():
     check("老说明（只有中文）英文界面下退回中文",
           i18n.pick_notes({"notes": "只有中文"}) == "只有中文")
     i18n.set_lang("zh")
+
+    # 回归：用了 _() 却没定义 _ 的文件，会让那个功能直接崩（2026-09-28 在 probe.py 踩过）
+    import glob as _glob
+    import re as _re
+    bad = []
+    for path in _glob.glob(os.path.join(ROOT, "app", "**", "*.py"), recursive=True):
+        src = open(path, encoding="utf-8").read()
+        if _re.search(r"(?<![\w.])_\(", src) and "_ = i18n.t" not in src \
+                and not _re.search(r"def _\(", src):
+            bad.append(os.path.relpath(path, ROOT))
+    check("用了 _() 的文件都定义了 _", not bad, "、".join(bad))
+
+
+def test_egg():
+    section("彩蛋（主菜单 [9] 千万别点 → 三个 Yes）")
+    import egg
+    import i18n
+
+    # —— Yes ③ 那门「人机翻译」语言 ——
+    check("机翻是藏起来的：不进选语言那屏",
+          "mt" not in [code for code, _ in i18n.available()])
+    check("但切得进去", i18n.set_lang("mt") == "mt")
+    check("机翻表确实加载了", i18n.t("主菜单") == "主 菜 单", i18n.t("主菜单"))
+    check("没翻到的照旧回落中文，不会变空",
+          i18n.t("这句话还没翻译") == "这句话还没翻译")
+    check("机翻的名字写它自己", i18n.lang_name("mt") == "机翻")
+    # 日志事件不许翻：彩蛋归彩蛋，反馈日志得让作者看得懂
+    check("日志键在机翻下保持原样", i18n.t("log:启动") == "log:启动")
+    i18n.set_lang("zh")
+    check("切得回来", i18n.t("主菜单") == "主菜单")
+
+    # —— Yes ② 那个"原地旋转" ——
+    grid = [["A", "B", "C"], ["D", "E", "F"]]
+    spun = grid
+    for _ in range(4):
+        spun = egg.rot90(spun)
+    check("转 4 个 90° 回到原样", spun == grid)
+    turned = egg.rot90(grid)
+    check("转 90° 行列互换", len(turned) == 3 and all(len(r) == 2 for r in turned))
+    check("中文按两格算（不然转出来会错位）", len(egg._cells("种子")) == 4)
+
+    # —— Yes ① 要用的资源 ——
+    check("彩蛋视频在", os.path.isfile(os.path.join(APP, "assets", "egg.mp4")))
+    check("彩蛋页面在", os.path.isfile(os.path.join(APP, "assets", "egg.html")))
+
+    # —— 机翻表和 en 表别各说各的 ——
+    with open(os.path.join(APP, "lang", "en.json"), encoding="utf-8") as fh:
+        en = json.load(fh)
+    with open(os.path.join(APP, "lang", "mt.json"), encoding="utf-8") as fh:
+        mt = json.load(fh)
+    check("机翻表的键都能在 en 表里找到", not [k for k in mt if k not in en])
+    check("机翻表没有空译文", all(v.strip() for v in mt.values()))
+    check("机翻表不掺日志键", not [k for k in mt if k.startswith("log:")])
 
 
 def test_onboard():
@@ -714,6 +778,7 @@ def main():
     test_updater_sources()
     test_spinner()
     test_i18n()
+    test_egg()
     test_onboard()
     test_export()
     test_terminal_width()

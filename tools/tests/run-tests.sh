@@ -23,6 +23,9 @@ if [ "$MODE" != "--quick" ]; then
     else
         "$PY" "$HERE/test_integration.py" || FAILED=1
     fi
+    echo
+    # 英文界面里不许漏中文（0 行才过）。改了文案就容易漏，所以放在常规档里盯着。
+    "$PY" "$HERE/test_en_leak.py" || FAILED=1
 fi
 
 echo

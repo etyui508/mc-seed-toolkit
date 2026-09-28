@@ -65,10 +65,12 @@ def _step(n, title):
     print("  " + ui.s(f"[{n}/5] ", "dim") + ui.s(_(title), "accent"))
 
 
-def _pick_language(ask, cfg):
+def pick_language(ask, cfg):
     """第一件事：问语言。
 
     这时候还不知道用哪种语言，所以这一屏本身是双语的。
+    公开函数：tool.py 在弹用户协议之前会先调它一次，这样英文用户看到的
+    第一屏就是英文（协议卡片不会再用中文糊他一脸）。
     """
     default = "1" if i18n.guess_from_system() == "zh" else "2"
     print()
@@ -84,6 +86,10 @@ def _pick_language(ask, cfg):
     i18n.set_lang(code)
     cfg["lang"] = code
     return code
+
+
+# 老名字留着，别处（含测试）可能还在用
+_pick_language = pick_language
 
 
 def _pick_version(ask, cfg, versions):
@@ -161,7 +167,7 @@ def run(ask, cfg, versions=None, save=None):
     """
     # 第一件事永远是问语言 —— 后面所有话都按它来
     if not cfg.get("lang"):
-        _pick_language(ask, cfg)
+        pick_language(ask, cfg)
         if save:
             save(cfg)
 

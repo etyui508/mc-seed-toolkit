@@ -18,6 +18,9 @@ import zipfile
 
 import i18n
 
+# 界面文字都过一遍 i18n；查不到译文就原样显示中文
+_ = i18n.t
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 RECORDS = os.path.join(ROOT, "记录")
@@ -150,6 +153,12 @@ def environment():
         info[_t_log("当前版本")] = state.USER_VER or _t_log("（没选）")
     except Exception:
         pass
+    try:
+        import ui
+        # 进度动画能不能画（有人反馈"算结构时看不到进度"，这一行能直接定位）
+        info["进度动画"] = ui.console_report()
+    except Exception:
+        pass
     return info
 
 
@@ -175,9 +184,9 @@ def text(limit=0):
         with open(LOG_FILE, encoding="utf-8", errors="replace") as fh:
             lines = fh.read().splitlines()
     except OSError:
-        return "（还没有日志）"
+        return _("（还没有日志）")
     if limit and len(lines) > limit:
-        lines = [f"（前面还有 {len(lines) - limit} 行，见完整文件）"] + lines[-limit:]
+        lines = [_("（前面还有 {n} 行，见完整文件）", n=len(lines) - limit)] + lines[-limit:]
     return "\n".join(lines)
 
 
@@ -243,7 +252,7 @@ def submit(title, body, contact="", extra=""):
     import urllib.request
 
     payload = {
-        "title": title or "（没写标题）",
+        "title": title or _("（没写标题）"),
         "body": body or "",
         "contact": contact or "",
         "version": _version(),
@@ -259,17 +268,17 @@ def submit(title, body, contact="", extra=""):
         with urllib.request.urlopen(req, timeout=20) as resp:
             result = json.loads(resp.read().decode("utf-8"))
         if result.get("ok"):
-            return True, result.get("message") or "已提交"
-        return False, result.get("message") or "反馈站没接受这条提交"
+            return True, result.get("message") or _("已提交")
+        return False, result.get("message") or _("反馈站没接受这条提交")
     except urllib.error.HTTPError as e:
         detail = ""
         try:
             detail = json.loads(e.read().decode("utf-8")).get("message", "")
         except Exception:
             pass
-        return False, detail or f"反馈站返回 {e.code}"
+        return False, detail or _("反馈站返回 {code}", code=e.code)
     except Exception as e:
-        return False, f"连不上反馈站（{e}）"
+        return False, _("连不上反馈站（{err}）", err=e)
 
 
 def bundle(include_records=True):

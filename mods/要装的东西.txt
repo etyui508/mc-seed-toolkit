@@ -1,17 +1,40 @@
-Minecraft 1.20.6（Fabric）要装的两个模组
-============================================
+MC 种子工具包 · 模组放这里（先挑对版本）
+How to pick your mods — match your Minecraft version
+=========================================================
 
-把这两个 jar 都复制到 .minecraft\mods\ 里面：
+⚠ 这个文件夹里**每个游戏版本一个子文件夹**，别在根目录里瞎抓 jar：
 
-  1) seedhelper-1.1.0.jar
-     记录模组：自动记末地柱子 / 史莱姆区块 / 哈希种子 / 群系
+    mods/1.21.10/   ← 玩 1.21.10 就用这个文件夹里的两个
+    mods/1.20.6/    ← 玩 1.20.6 就用这个
+    ...
 
-  2) simple-world-downloader-1.20.6-swdpathfix.jar
-     下载器：把服务器地图存到本地（算种子必须要它）
+每个版本文件夹里都有一份 `要装的东西.txt`，写着**这个版本**该复制哪两个 jar 到
+`.minecraft\mods\`。照那份抄就行。
+Each per-version folder has its own `要装的东西.txt` listing the exact two jars for
+THAT Minecraft version — copy those two into `.minecraft\mods\`.
 
-还要装 Fabric API（去 Modrinth 搜 fabric-api，挑对应版本的）。
+    mods/multi/     ← 所有版本的 jar 平铺在一起（自己编模组 / 找别的版本时用）
+                        all versions flattened in one folder
 
-几个注意：
-  · 这两个都是给 1.20.6 编的，装到别的版本上游戏会报错
-  · 两个缺一不可：只有下载器只能下地图，只有记录模组没地图可算
-  · 装好之后：进服 → 开下载器飞一圈（末地中央岛一定要去）→ 回主菜单选 1 算种子
+---------------------------------------------------------
+
+为什么不能乱抓（Why the version matters）
+
+  · 记录模组（seedhelper）和下载器都是**按游戏版本编译**的，装错版本游戏直接崩；
+  · 文件名里的 `+1.21.10` / `-1.20.6-` 就是给你对版本用的；
+  · 不确定自己玩哪个版本：进游戏，右下角（或按 F3）能看到。
+
+要装的永远是两个（缺一不可）：
+
+  1) 记录模组   seedhelper-1.1.0.jar
+     自动记末地柱子 / 史莱姆区块 / 哈希种子 / 群系
+  2) 下载器     simple-world-downloader-*<版本>*.jar（1.20.4 及更老叫 archive-wdl-fabric-*）
+     把服务器地图存到本地 —— 算种子必须要它
+
+外加 **Fabric API**（去 Modrinth 搜 fabric-api，挑对应游戏版本）。
+
+Support: the recorder and the downloader are compiled per Minecraft version; a
+wrong-version jar crashes the game. Always take the two jars from `mods/<your
+version>/`, and install Fabric API for your version.
+
+完整对应表 / full table：docs/版本支持.md

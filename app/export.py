@@ -23,6 +23,12 @@ ROOT = os.path.dirname(HERE)
 RESULTS = os.path.join(ROOT, "记录", "结果.jsonl")
 EXPORT_DIR = os.path.join(ROOT, "记录", "导出")
 
+sys.path.insert(0, HERE)
+import i18n                                            # noqa: E402
+
+# 导出时给用户看的提示都过一遍语言表（查不到就原样显示中文）
+_ = i18n.t
+
 
 def load(n=1):
     """读最近 n 条结果（新的在前）"""
@@ -88,9 +94,10 @@ def as_mcfunction(rows, name="mcseed"):
     用 tp 而不是 /execute in ... run tp —— 保持简单，跨维度自己切一下。
     每条前面加个 tellraw，到了会看到这是什么地方。
     """
-    lines = [f"# MC 种子工具包导出 {datetime.datetime.now():%Y-%m-%d %H:%M}",
-             "# 用法：放到 <存档>/datapacks/mcseed/data/<命名空间>/functions/mcseed.mcfunction",
-             "#       然后在游戏里 /reload 之后执行 /function <命名空间>:mcseed", ""]
+    lines = [_("# MC 种子工具包导出 {when}",
+               when=f"{datetime.datetime.now():%Y-%m-%d %H:%M}"),
+             _("# 用法：放到 <存档>/datapacks/mcseed/data/<命名空间>/functions/mcseed.mcfunction"),
+             _("#       然后在游戏里 /reload 之后执行 /function <命名空间>:mcseed"), ""]
     total = 0
     for r in rows:
         pts = parse_gotos(r.get("text", ""))
@@ -127,7 +134,7 @@ def copy_to_clipboard(text):
                 return True, " ".join(os.path.basename(c) for c in cmd[:1])
         except (OSError, subprocess.SubprocessError):
             continue
-    return False, "没找到能用的剪贴板命令"
+    return False, _("没找到能用的剪贴板命令")
 
 
 def save(content, suffix):
@@ -156,34 +163,34 @@ FORMATS = {
 def do_export(rows, fmt):
     """返回 (成功?, 说明, 路径或内容)"""
     if not rows:
-        return False, "还没有查询记录（先跑一条查询）", None
+        return False, _("还没有查询记录（先跑一条查询）"), None
     if fmt == "clip":
         text = as_text(rows)
         ok, how = copy_to_clipboard(text)
-        return ok, (f"已复制到剪贴板（{how}）" if ok else how), text
+        return ok, (_("已复制到剪贴板（{how}）", how=how) if ok else how), text
     fn, suffix = FORMATS[fmt]
     content = fn(rows)
     if not content:
-        return False, "这些结果里没有可导出的坐标", None
+        return False, _("这些结果里没有可导出的坐标"), None
     path = save(content, suffix)
-    return True, f"已导出 {os.path.relpath(path, ROOT)}", path
+    return True, _("已导出 {path}", path=os.path.relpath(path, ROOT)), path
 
 
 def main():
-    p = argparse.ArgumentParser(description="导出 / 复制查询结果")
-    p.add_argument("--last", type=int, default=1, help="导出最近几条（默认 1）")
+    p = argparse.ArgumentParser(description=_("导出 / 复制查询结果"))
+    p.add_argument("--last", type=int, default=1, help=_("导出最近几条（默认 1）"))
     p.add_argument("--format", default="txt",
                    choices=["txt", "json", "mcfunction", "map", "clip"])
-    p.add_argument("--list", action="store_true", help="看看有哪些结果")
+    p.add_argument("--list", action="store_true", help=_("看看有哪些结果"))
     a = p.parse_args()
     if a.list:
         rows = load(0)
-        print(f"共 {len(rows)} 条查询记录：")
+        print(_("共 {n} 条查询记录：", n=len(rows)))
         for r in rows[-20:]:
             print(f"  {r.get('time','')}  {r.get('label','')}")
         return 0
     rows = load(a.last)
-    ok, msg, _ = do_export(rows, a.format)
+    ok, msg, _extra = do_export(rows, a.format)
     print(("✅ " if ok else "❌ ") + msg)
     return 0 if ok else 1
 

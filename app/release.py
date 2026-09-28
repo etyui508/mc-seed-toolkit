@@ -54,18 +54,18 @@ def verify_manifest(man, keys=None):
     """验签。返回 (是否信任, 说明)"""
     keys = keys if keys is not None else PUBLIC_KEYS
     if not isinstance(man, dict):
-        return False, "清单不是个 JSON 对象"
+        return False, _("清单不是个 JSON 对象")
     sig_hex = man.get("sig")
     if not sig_hex:
-        return False, "清单上没有签名（sig）"
+        return False, _("清单上没有签名（sig）")
     if str(man.get("sig_alg", "ed25519")) != "ed25519":
-        return False, f"不认识的签名算法：{man.get('sig_alg')}"
+        return False, _("不认识的签名算法：{alg}", alg=man.get("sig_alg"))
     if not keys:
-        return False, "客户端里没有内置任何公钥（这份包不完整）"
+        return False, _("客户端里没有内置任何公钥（这份包不完整）")
     try:
         sig = bytes.fromhex(str(sig_hex))
     except ValueError:
-        return False, "签名不是合法的十六进制"
+        return False, _("签名不是合法的十六进制")
     msg = canonical(man)
     for pub_hex in keys:
         try:
@@ -73,10 +73,13 @@ def verify_manifest(man, keys=None):
         except ValueError:
             continue
         if ed25519.verify(sig, msg, pub):
-            return True, "签名有效"
-    return False, "签名对不上（清单被改过，或者不是我们签的）"
+            return True, _("签名有效")
+    return False, _("签名对不上（清单被改过，或者不是我们签的）")
 
 
 def trusted_keys_text():
     """把内置公钥列出来（排查时看）"""
     return "\n".join("  " + k for k in PUBLIC_KEYS) or "  （没有）"
+import i18n                 # 验签失败的说明是给用户看的，走语言表
+
+_ = i18n.t

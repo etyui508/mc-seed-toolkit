@@ -26,6 +26,13 @@ LANGS = {
     "zh": "中文",
     "en": "English",
 }
+
+# 藏起来的语言：不进「选语言」那屏，也不在设置里列出来，
+# 只有主菜单那个彩蛋（[9] 千万别点 → Yes ③）能切过去。
+# 表是 tools/make-mt-lang.py 自动生成的，翻不全的地方照常回落到中文。
+HIDDEN_LANGS = {
+    "mt": "机翻",
+}
 DEFAULT = "zh"
 
 _lang = DEFAULT
@@ -33,12 +40,13 @@ _table = {}
 
 
 def available():
-    """有哪些语言：[(代码, 名字), ...]"""
+    """有哪些语言：[(代码, 名字), ...]（只列能选的，彩蛋语言不算）"""
     return [(code, name) for code, name in LANGS.items()]
 
 
 def lang_name(code):
-    return LANGS.get((code or "").lower(), code or DEFAULT)
+    code = (code or "").lower()
+    return LANGS.get(code) or HIDDEN_LANGS.get(code) or code or DEFAULT
 
 
 def current():
@@ -59,10 +67,16 @@ def set_lang(code):
     """切语言。未知代码当作默认（中文）。"""
     global _lang, _table
     code = str(code or "").strip().lower()
-    if code not in LANGS:
+    if code not in LANGS and code not in HIDDEN_LANGS:
         code = DEFAULT
     _lang = code
     _table = {} if code == DEFAULT else _load(code)
+    # 子进程（Java 工具、cubiomes、calc_seed.py 这些）拿不到内存里的语言，
+    # 只能靠环境变量传 —— 它们起来的时候会读 MC_LANG。
+    try:
+        os.environ["MC_LANG"] = code
+    except Exception:
+        pass
     return _lang
 
 

@@ -8,24 +8,51 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # 解压时多套了一层（里面还有个同名文件夹）也能自动找到真正的工具目录
+RELOCATED=""
 if [ ! -f "$HERE/app/tool.py" ]; then
     inner="$(find "$HERE" -maxdepth 3 -name tool.py -print -quit 2>/dev/null || true)"
     if [ -n "$inner" ]; then
         HERE="$(dirname "$(dirname "$inner")")"
-        echo "（自动定位到工具目录：$HERE）"
+        RELOCATED="1"
     fi
+fi
+
+# ---------- 界面语言：跟工具里的语言设置对齐 ----------
+# 优先环境变量 MC_LANG（app/i18n.py 也是用它把语言传给子进程），
+# 其次读 .mc-tool.json 里的 "lang"；都认不出来就是中文。
+UI_LANG="zh"
+case "${MC_LANG:-}" in
+    en*|EN*) UI_LANG="en" ;;
+    zh*|ZH*) UI_LANG="zh" ;;
+    *)
+        if [ -f "$HERE/.mc-tool.json" ] \
+           && grep -q '"lang"[[:space:]]*:[[:space:]]*"en"' "$HERE/.mc-tool.json" 2>/dev/null; then
+            UI_LANG="en"
+        fi
+        ;;
+esac
+
+# 同一句话两种说法，按上面的 UI_LANG 挑一个
+say() {
+    if [ "$UI_LANG" = "en" ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi
+}
+
+if [ -n "$RELOCATED" ]; then
+    say "（自动定位到工具目录：$HERE）" "(toolkit located at: $HERE)"
 fi
 
 # ---------- 0) Windows 原生（Git Bash / MSYS）也能跑了：用 Windows 版 Python + .exe 工具 ----------
 case "$(uname -s 2>/dev/null || echo unknown)" in
     MINGW*|MSYS*|CYGWIN*|Windows*)
-        echo "（检测到 Windows 的 Git Bash / MSYS —— 走 Windows 原生模式，用 findstruct.exe + 你的 Java）"
+        say "（检测到 Windows 的 Git Bash / MSYS —— 走 Windows 原生模式，用 findstruct.exe + 你的 Java）" \
+            "(Git Bash / MSYS on Windows detected - running natively with findstruct.exe + your Java)"
         PY=""
         for c in "py -3" python.exe python py; do
             if command -v ${c%% *} >/dev/null 2>&1; then PY="$c"; break; fi
         done
         if [ -z "$PY" ]; then
-            echo "没找到 Python 3。装一个：https://www.python.org/downloads/ （安装时勾选 Add python.exe to PATH）"
+            say "没找到 Python 3。装一个：https://www.python.org/downloads/ （安装时勾选 Add python.exe to PATH）" \
+                "Python 3 not found. Install it: https://www.python.org/downloads/ (tick \"Add python.exe to PATH\")"
             exit 1
         fi
         export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
@@ -37,7 +64,8 @@ esac
 # ---------- 1) Python ----------
 PY="${PYTHON:-python3}"
 if ! command -v "$PY" >/dev/null 2>&1; then
-    echo "缺少 Python 3。装一下：sudo apt update && sudo apt install -y python3"
+    say "缺少 Python 3。装一下：sudo apt update && sudo apt install -y python3" \
+        "Python 3 is missing. Install it: sudo apt update && sudo apt install -y python3"
     exit 1
 fi
 
@@ -57,10 +85,12 @@ find_java() {
 
 if JAVA="$(find_java)"; then
     export TOOLKIT_JAVA="$JAVA"
-    echo "（使用 Java：$JAVA）"
+    say "（使用 Java：$JAVA）" "(using Java: $JAVA)"
 else
-    echo "警告：没有找到能用的 Java —— 包里自带的那份在 $HERE/runtime/jre/bin/java"
-    echo "      如果它跑不起来，可以 sudo apt install -y openjdk-21-jre-headless"
+    say "警告：没有找到能用的 Java —— 包里自带的那份在 $HERE/runtime/jre/bin/java" \
+        "Warning: no working Java found - the bundled one should be at $HERE/runtime/jre/bin/java"
+    say "      如果它跑不起来，可以 sudo apt install -y openjdk-21-jre-headless" \
+        "      if that one does not run, try: sudo apt install -y openjdk-21-jre-headless"
 fi
 
 # ---------- 3) U 盘不让执行程序时，复制到本机缓存跑 ----------
@@ -83,7 +113,8 @@ if [ -x "$HERE/out/findstruct" ]; then
                 ln -sfn "$f" "$RUN_DIR/$(basename "$f")"
             fi
         done
-        echo "（这个盘不能直接执行程序，已复制到 $RUN_DIR 运行；配置和种子仍留在原处）"
+        say "（这个盘不能直接执行程序，已复制到 $RUN_DIR 运行；配置和种子仍留在原处）" \
+            "(this drive can not run programs directly, so it was copied to $RUN_DIR; config and seeds stay where they are)"
     fi
 fi
 

@@ -49,7 +49,7 @@ def sandbox():
             shutil.copy2(p, os.path.join(tmp, name))
     with open(os.path.join(tmp, ".mc-tool.json"), "w", encoding="utf-8") as fh:
         json.dump({"seed": SEED, "mc": VER, "show_seed": False, "agreed": "1:test",
-                   "channel": "stable"}, fh)
+                   "channel": "stable", "lang": "zh"}, fh)
     return tmp
 
 

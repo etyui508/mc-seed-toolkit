@@ -10,13 +10,20 @@
 import datetime
 import os
 
+import i18n
+
+# 界面文字都过一遍 i18n；查不到译文就原样显示中文
+_ = i18n.t
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DOC = os.path.join(ROOT, "docs", "用户协议与隐私政策.md")
+DOC_EN = os.path.join(ROOT, "docs", "用户协议与隐私政策.en.md")
 
 AGREEMENT_VERSION = "1"
 
 # 正文太长，终端里只显示这几条要点；全文在 docs/用户协议与隐私政策.md
+# 注意：这里存的是中文原文，翻译在显示的时候现查（import 时 i18n 还不知道用户选了哪种语言）
 POINTS = [
     ("纯客户端", "不连服务器、不用 OP，算力都在你自己电脑上"),
     ("服规自己看", "很多服把「下载地图 / 破种子」写进规则了"),
@@ -41,26 +48,28 @@ def mark_agreed(cfg):
 
 
 def full_text():
-    """协议全文（读文档；文档没了就退化成要点）"""
+    """协议全文（按当前语言读文档；文档没了就退化成要点）"""
+    path = DOC_EN if (i18n.current() == "en" and os.path.isfile(DOC_EN)) else DOC
     try:
-        with open(DOC, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return fh.read()
     except OSError:
-        return "（找不到 docs/用户协议与隐私政策.md，以下是要点）\n\n" + \
-               "\n".join(f"· {t}：{d}" for t, d in POINTS)
+        return _("（找不到 docs/用户协议与隐私政策.md，以下是要点）") + "\n\n" + \
+               "\n".join(f"· {_(t)}：{_(d)}" for t, d in POINTS)
 
 
 def show(ask, width=None):
     """把协议摆出来，问用户同不同意。ask 是工具里那个输入函数"""
     import ui
+    doc_name = os.path.basename(DOC_EN) if i18n.current() == "en" else os.path.basename(DOC)
     print()
     print(ui.box(
-        [ui.s("第一次运行，先花十秒看一遍这几条：", "bold")] +
-        [""] + [f"{ui.s('·', 'dim')} {ui.s(t, 'key')} —— {d}" for t, d in POINTS] + [""] +
-        [ui.s(f"  版本 v{AGREEMENT_VERSION} · 全文在 docs/用户协议与隐私政策.md", "hint")],
-        title="用户协议 & 隐私政策", width=width))
+        [ui.s(_("第一次运行，先花十秒看一遍这几条："), "bold")] +
+        [""] + [f"{ui.s('·', 'dim')} {ui.s(_(t), 'key')} —— {_(d)}" for t, d in POINTS] + [""] +
+        [ui.s(_("  版本 v{ver} · 全文在 docs/{doc}", ver=AGREEMENT_VERSION, doc=doc_name), "hint")],
+        title=_("用户协议 & 隐私政策"), width=width))
     print()
-    print("  " + ui.info("看全文：主菜单里随时可以再翻（或者直接打开上面那个 md 文件）"))
+    print("  " + ui.info(_("看全文：主菜单里随时可以再翻（或者直接打开上面那个 md 文件）")))
     print()
-    answer = (ask("同意吗？同意才能往下用 [Y/n]: ", default="y") or "y").strip().lower()
+    answer = (ask(_("同意吗？同意才能往下用 [Y/n]: "), default="y") or "y").strip().lower()
     return answer not in ("n", "no", "不", "不同意")

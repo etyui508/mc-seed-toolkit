@@ -84,6 +84,14 @@ def main():
             ver = "?"
         message = f"MC 种子工具包 v{ver}（源码 + 模组 + 文档 + 测试）"
     files = tracked_files()
+    # git 的索引里可能还留着早就删掉的文件（删了没 git rm 就会这样）。
+    # 以前这里直接 getsize，一遇到就 FileNotFoundError 把整个发布打断 ——
+    # 跳过它们，顺便说一声：推上去的树里自然就没有这些文件了。
+    gone = [f for f in files if not os.path.isfile(os.path.join(ROOT, f))]
+    if gone:
+        print(f"（索引里有 {len(gone)} 个文件已经不在磁盘上，跳过：" +
+              "、".join(gone[:3]) + ("…" if len(gone) > 3 else "") + "）")
+    files = [f for f in files if os.path.isfile(os.path.join(ROOT, f))]
     total = sum(os.path.getsize(os.path.join(ROOT, f)) for f in files)
     print(f"要推 {len(files)} 个文件，共 {total/1048576:.1f} MB")
     if dry:

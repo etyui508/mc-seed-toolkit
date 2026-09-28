@@ -20,8 +20,13 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import config as cfgmod
 import diag
+import i18n
+import outtext
 import state
 import ui
+
+# 界面文字走语言表；查不到就原样显示中文
+_ = i18n.t
 
 OUT = os.path.join(ROOT, "out")
 LOG_FILE = os.path.join(ROOT, "记录", "坐标记录.txt")
@@ -83,13 +88,13 @@ def run(cmd, quiet=False):
         r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
     except FileNotFoundError:
         if not quiet:
-            print(f"没找到 {cmd[0]}。")
+            print(_("没找到 {cmd}。", cmd=cmd[0]))
             if cmd[0] == JAVA:
                 print(cfgmod.java_hint())
         return ""
     except OSError as e:            # 不能执行（Windows 上跑 Linux 版 java / findstruct 就是这里）
         if not quiet:
-            print(f"执行失败: {cmd[0]} -> {e}")
+            print(_("执行失败: {cmd} -> {err}", cmd=cmd[0], err=e))
             if cmd[0] == JAVA:
                 print(cfgmod.java_hint())
         return ""
@@ -123,13 +128,17 @@ def run_and_log(func, args, label):
     """跑一个功能，同时把结果打到屏幕 + 追加到日志文件"""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        func(args)
+        # 外面套一层动画：这样**所有**慢查询都有实时进度，不只是走 findstruct 的那几个
+        # （矿石分布 / 扫存档这些以前是干等着，屏幕上一点动静都没有）。
+        # 里面那层更具体的动画会自动把文案换掉，不会两个抢一行。
+        with ui.spinner(label):
+            func(args)
     text = strip_progress(buf.getvalue())
     if not state.SHOW_SEED and state.SEED is not None:
         text = text.replace(str(state.SEED), cfgmod.mask(state.SEED, False))
     print(_pretty(text), end="")
     log_result(label, text)
-    print(ui.info(f"结果已存到 记录/{os.path.basename(LOG_FILE)}"))
+    print(ui.info(_("结果已存到 记录/{name}", name=os.path.basename(LOG_FILE))))
     # 诊断日志：记"跑了哪个查询、出来多少行"就够了，具体坐标在 坐标记录.txt 里
     diag.log("查询", 功能=label, 输出行数=len(text.splitlines()))
 
@@ -142,7 +151,7 @@ def log_result(label, text):
             fh.write(text if text.endswith("\n") else text + "\n")
     except Exception as e:
         diag.error("写结果记录失败", exc=e, 目标=LOG_FILE)
-        print(ui.warn(f"写日志失败: {e}"))
+        print(ui.warn(_("写日志失败: {err}", err=e)))
     _append_result(label, text)
 
 
@@ -161,6 +170,9 @@ def _pretty(text):
     raw = str(text)
     out = []
     for line in raw.splitlines():
+        # 引擎（C 的 findstruct / Java 工具）吐的是中文，显示前先过一层显示层翻译；
+        # 上面写日志用的还是原文，别动
+        line = outtext.localize(line)
         stripped = line.strip()
         m = re.match(r"^(\s*\[[^\]]+\])", line)
         if m:
@@ -172,7 +184,7 @@ def _pretty(text):
         if "★" in line:
             line = line.replace("★", ui.star())
         line = re.sub(r"(goto -?\d+ -?\d+)", lambda mm: ui.s(mm.group(1), "key"), line)
-        line = re.sub(r"(群系 [A-Za-z_]+)", lambda mm: ui.s(mm.group(1), "dim"), line)
+        line = re.sub(r"((?:群系|biome) [A-Za-z_]+)", lambda mm: ui.s(mm.group(1), "dim"), line)
         out.append(line)
     return "\n".join(out) + ("\n" if raw.endswith("\n") else "")
 
@@ -296,10 +308,10 @@ def _merge_findrect(parts, top):
         found = counts.get(key, 0)
         items = sorted(rows.get(key, []), key=lambda t: t[0])[:top]
         out.append("")
-        out.append(f"[{key[0]}] {key[1]}：{found} 个过了群系检查")
+        out.append(f"[{key[0]}] {key[1]}：" + _("{n} 个过了群系检查", n=found))
         out.extend(line for _, line in items)
         if found > len(items):
-            out.append(f"  …还有 {found - len(items)} 个")
+            out.append(_("  …还有 {n} 个", n=found - len(items)))
     return "\n".join(out) + "\n"
 
 def run_find(center_x, center_z, radius, top, min_dist=0, max_dist=0, nobiome=False):
@@ -308,14 +320,15 @@ def run_find(center_x, center_z, radius, top, min_dist=0, max_dist=0, nobiome=Fa
     # 扫得大的时候拆成几条竖条、开多个子进程并行扫（引擎支持 findrect）
     # top 大、又要群系的那种（比如"附近结构总览"）不并行：行数会翻好几倍，每行都要算群系
     if HAS_CUBIOMES and chunks_radius >= PARALLEL_SCAN_MIN_CHUNKS and (nobiome or top <= 64):
-        with ui.spinner(f"正在扫 {chunks_radius * 16} 格内的结构（并行）"):
+        with ui.spinner(_("正在扫 {r} 格内的结构（并行）", r=chunks_radius * 16)):
             merged = _run_find_parallel(cx, cz, chunks_radius, top, min_dist, max_dist, nobiome)
         if merged:
             return parse_struct_output(merged), merged
         if nobiome:
             nobiome = False      # 并行失败就退回"一个进程扫整片"（那个必然带群系）
     def java_fallback(reason):
-        print(f"（{reason}，改用纯 Java 版列候选位置；少了群系检查，位置偶尔会偏）")
+        print(_("（{reason}，改用纯 Java 版列候选位置；少了群系检查，位置偶尔会偏）",
+                reason=reason))
         out = run(JAVA_CMD + ["-cp", OUT, "FindStructures", str(state.SEED), str(cx), str(cz),
                               str(chunks_radius)])
         if not out.strip():
@@ -323,9 +336,9 @@ def run_find(center_x, center_z, radius, top, min_dist=0, max_dist=0, nobiome=Fa
                 print()
                 print(cfgmod.java_hint())
             else:
-                print("\n跑 Java 工具没输出 —— Java 在，但这次它没给出结果（存档/版本对不上也会这样）。")
-                print(f"当前用的 Java：{JAVA}")
-                print("不行就去主菜单 3【设置】里换一个 Java 路径试试。")
+                print(_("\n跑 Java 工具没输出 —— Java 在，但这次它没给出结果（存档/版本对不上也会这样）。"))
+                print(_("当前用的 Java：{java}", java=JAVA))
+                print(_("不行就去主菜单 3【设置】里换一个 Java 路径试试。"))
         hits = parse_struct_output(out)
         if min_dist or max_dist:
             # 这个老工具的 t[2] 是"区块距离"，乘 16 换成方块（近似，只能这么筛）
@@ -335,13 +348,13 @@ def run_find(center_x, center_z, radius, top, min_dist=0, max_dist=0, nobiome=Fa
         return hits, out
 
     if not HAS_CUBIOMES:
-        why = "没找到能用的 findstruct（cubiomes 工具）"
+        why = _("没找到能用的 findstruct（cubiomes 工具）")
         return java_fallback(why)
-    with ui.spinner(f"正在扫 {chunks_radius * 16} 格内的结构"):
+    with ui.spinner(_("正在扫 {r} 格内的结构", r=chunks_radius * 16)):
         out = run([FINDSTRUCT, "find", str(state.SEED), str(cx), str(cz), str(chunks_radius),
                    str(top), str(min_dist), str(max_dist)])
     if not out.strip():
-        return java_fallback("cubiomes 版跑不起来")
+        return java_fallback(_("cubiomes 版跑不起来"))
     return parse_struct_output(out), out
 
 def load_gateways():
@@ -360,7 +373,7 @@ def load_gateways():
                         pass                      # 缓存文件坏了一行，忽略就行
         if pts:
             return pts
-    print("第一次算折跃门落点，稍等（约 20 秒）…")
+    print(_("第一次算折跃门落点，稍等（约 20 秒）…"))
     out = run([FINDSTRUCT, "find", str(state.SEED), "0", "0", "2100", "3000", "0"])
     pts, name = [], None
     for line in out.splitlines():
@@ -373,7 +386,7 @@ def load_gateways():
     with open(cache, "w", encoding="utf-8") as fh:
         for x, z in pts:
             fh.write(f"{x} {z}\n")
-    print(f"  折跃门落点 {len(pts)} 个，已缓存")
+    print(_("  折跃门落点 {n} 个，已缓存", n=len(pts)))
     return pts
 
 def gateway_dist(x, z, gateways):
@@ -382,11 +395,11 @@ def gateway_dist(x, z, gateways):
 def window_text(min_dist, max_dist):
     """把距离窗口说成人话（都没设就返回空串）"""
     if min_dist and max_dist:
-        return f"只要 {min_dist} ~ {max_dist} 格之间的"
+        return _("只要 {a} ~ {b} 格之间的", a=min_dist, b=max_dist)
     if min_dist:
-        return f"只要 {min_dist} 格以外的（远的）"
+        return _("只要 {a} 格以外的（远的）", a=min_dist)
     if max_dist:
-        return f"只要 {max_dist} 格以内的"
+        return _("只要 {a} 格以内的", a=max_dist)
     return ""
 
 def fit_radius(radius, min_dist, max_dist):
@@ -397,21 +410,23 @@ def fit_radius(radius, min_dist, max_dist):
     if min_dist:
         want = max(want, int(min_dist * 1.5))
     if want > radius:
-        print(f"（搜索半径 {radius} 格比距离窗口还小，自动放大到 {want} 格）")
+        print(_("（搜索半径 {radius} 格比距离窗口还小，自动放大到 {want} 格）",
+                radius=radius, want=want))
         return want
     return radius
 
 def print_hits(title, hits, extra=None, limit=12):
     if not hits:
-        print(f"{title}：这个范围里没有")
+        print(_("{title}：这个范围里没有", title=title))
         return
-    print(f"\n{title}（{len(hits)} 个）")
+    print(_("\n{title}（{n} 个）", title=title, n=len(hits)))
     for i, item in enumerate(hits[:limit], 1):
         x, z, d = item[0], item[1], item[2]
         note = (extra(item) if extra else "") or ""
-        print(f"  {i}. goto {x} {z}   距中心 {d} 格" + (f"   {note}" if note else ""))
+        print(f"  {i}. goto {x} {z}" + _("   距中心 {d} 格", d=d)
+              + (f"   {note}" if note else ""))
     if len(hits) > limit:
-        print(f"  …还有 {len(hits) - limit} 个")
+        print(_("  …还有 {n} 个", n=len(hits) - limit))
 
 def is_nether_name(name):
     return bool(name) and any(n in name for n in NETHER_NAMES)

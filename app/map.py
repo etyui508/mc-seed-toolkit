@@ -19,6 +19,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import export                                          # noqa: E402
+import i18n                                            # noqa: E402
+
+# 地图上的文字也过一遍语言表（查不到就原样显示中文）
+_ = i18n.t
 
 W, H = 820, 820                 # 画布
 PAD = 64                        # 四周留白（放刻度和方向）
@@ -36,8 +40,9 @@ def nice_step(span, max_labels=8):
     return 100000
 
 
-def build(points, title="MC 种子工具包 · 结构地图"):
+def build(points, title=None):
     """points: [{'x','z','dim','note'}]  ->  SVG 文本"""
+    title = title or _("MC 种子工具包 · 结构地图")
     if not points:
         return None
     # 主世界 / 下界 / 末地是三个不同的坐标空间，混在一张图上比例尺会被拉爆
@@ -55,8 +60,9 @@ def build(points, title="MC 种子工具包 · 结构地图"):
              f'<text x="20" y="30" fill="#dee2e6" font-size="19" font-weight="600">'
              f'{html.escape(title)}</text>',
              f'<text x="20" y="50" fill="#8b93a3" font-size="12">'
-             f'{len(points)} 个点 · 按维度分栏（三个空间坐标不是一回事） · '
-             f'生成于 {datetime.datetime.now():%Y-%m-%d %H:%M}</text>']
+             + _("{n} 个点 · 按维度分栏（三个空间坐标不是一回事） · 生成于 {when}",
+                 n=len(points), when=f"{datetime.datetime.now():%Y-%m-%d %H:%M}")
+             + "</text>"]
     for i, (dim, pts) in enumerate(panels):
         x0 = i * (pw + 12)
         # 坐标直接算成绝对值（不用 <g transform>）—— 这样任何 SVG 渲染器都认，简单省事
@@ -64,7 +70,7 @@ def build(points, title="MC 种子工具包 · 结构地图"):
                             short_labels=True))
     # 多栏时点旁边只写编号，完整说明放底部图例 —— 不然一行说明比一整栏还宽，会溢到隔壁
     parts.append(f'<text x="20" y="{H - 128}" fill="#8b93a3" font-size="13">'
-                 f'点在哪里（编号跟图上的数字对应）：</text>')
+                 + _("点在哪里（编号跟图上的数字对应）：") + "</text>")
     y = H - 106
     col_w = (W - 40) // 2
     for i, p in enumerate(points, 1):
@@ -110,11 +116,13 @@ def _panel(dim, points, title, w, h, body_only=False, ox=0, oy=0, short_labels=F
             f'<rect width="{W}" height="{H}" fill="#171a21"/>',
             f'<text x="20" y="30" fill="#dee2e6" font-size="19" font-weight="600">'
             f'{html.escape(title)}</text>',
-            f'<text x="20" y="50" fill="#8b93a3" font-size="12">{len(points)} 个点 · '
-            f'范围约 {span} 格 · 生成于 {datetime.datetime.now():%Y-%m-%d %H:%M}</text>',
+            f'<text x="20" y="50" fill="#8b93a3" font-size="12">'
+            + _("{n} 个点 · 范围约 {span} 格 · 生成于 {when}", n=len(points), span=span,
+                when=f"{datetime.datetime.now():%Y-%m-%d %H:%M}") + "</text>",
         ]
     parts.append(f'<text x="{ox + PAD}" y="{oy + 20}" fill="{COLORS.get(dim, COLORS[""])}" '
-                 f'font-size="15" font-weight="600">{html.escape(dim)}（{len(points)} 个）</text>')
+                 f'font-size="15" font-weight="600">{html.escape(dim)}'
+                 + _("（{n} 个）", n=len(points)) + "</text>")
 
     # 网格 + 刻度
     start_x = int(x0 // step) * step
@@ -135,13 +143,13 @@ def _panel(dim, points, title, w, h, body_only=False, ox=0, oy=0, short_labels=F
 
     # 方向和比例尺
     parts.append(f'<text x="{ox+W/2}" y="{oy+PAD-14}" fill="#6c7574" font-size="11" '
-                 f'text-anchor="middle">北 ↑（z 减小）</text>')
+                 f'text-anchor="middle">' + _("北 ↑（z 减小）") + "</text>")
     bar = step
     bx, by = ox + PAD, oy + H - 24
     parts.append(f'<line x1="{bx}" y1="{by}" x2="{bx + bar/span*(W-2*PAD):.1f}" y2="{by}" '
                  f'stroke="#8b93a3" stroke-width="2"/>')
     parts.append(f'<text x="{bx + bar/span*(W-2*PAD) + 8:.1f}" y="{by+4}" fill="#8b93a3" '
-                 f'font-size="11">{bar} 格</text>')
+                 f'font-size="11">' + _("{n} 格", n=bar) + "</text>")
 
     # 点（同一坐标的点错开一点，免得完全重叠）
     seen = {}
@@ -176,14 +184,14 @@ def collect(rows, per_row=40):
 
 
 def main():
-    p = argparse.ArgumentParser(description="把查询结果画成 SVG 地图")
+    p = argparse.ArgumentParser(description=_("把查询结果画成 SVG 地图"))
     p.add_argument("--last", type=int, default=1)
     p.add_argument("--out", default=None)
     a = p.parse_args()
     rows = export.load(a.last)
     points = collect(rows)
     if not points:
-        print("❌ 没找到可画的坐标（先跑一条查询）")
+        print(_("❌ 没找到可画的坐标（先跑一条查询）"))
         return 1
     svg = build(points)
     out = a.out or os.path.join(ROOT, "记录", "导出",
@@ -191,8 +199,9 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(svg)
-    print(f"✅ 画好了：{os.path.relpath(out, ROOT)}（{len(points)} 个点）")
-    print("   用浏览器打开就能看（Chrome/Edge 双击也行）")
+    print(_("✅ 画好了：{path}（{n} 个点）",
+            path=os.path.relpath(out, ROOT), n=len(points)))
+    print(_("   用浏览器打开就能看（Chrome/Edge 双击也行）"))
     return 0
 
 

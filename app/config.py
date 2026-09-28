@@ -13,6 +13,10 @@ import re
 import shutil
 import subprocess
 
+import i18n                 # 界面文字走语言表（查不到就原样显示中文）
+
+_ = i18n.t
+
 HERE = os.path.dirname(os.path.abspath(__file__))          # app/ 目录（程序本体）
 ROOT = os.path.dirname(HERE)                               # 工具包根目录
 RECORDS = os.path.join(ROOT, "记录")                        # 运行记录 / 缓存统一放这里
@@ -321,18 +325,14 @@ def find_java():
 def java_hint():
     """找不到 Java 时给用户的说明（Windows / Linux 分别说）"""
     if os.name == "nt":
-        return (
-            "没找到能用的 Java。三个办法，任选一个：\n"
-            "  1) 用【完整版】的 START.bat 启动 —— 包里自带 Windows 版 Java（runtime\\jre-win），会自动用上；\n"
-            "  2) 已经在玩 Minecraft 的话，Java 一定在机器上：主菜单 3【设置】里把 Java 路径填成\n"
-            "     ...\\bin\\java.exe（官方启动器/PCL 自带的在 %APPDATA%\\.minecraft\\runtime\\ 里面）；\n"
-            "  3) 装一个 Java 21： https://adoptium.net/ （装完重开这个窗口）"
-        )
-    return (
-        "没找到能用的 Java。两个办法：\n"
-        "  1) 用 bash run.sh 启动（它会自动用包里自带的 runtime/jre）；\n"
-        "  2) 或者 sudo apt install -y openjdk-21-jre-headless"
-    )
+        return _("没找到能用的 Java。三个办法，任选一个：\n"
+                 "  1) 用【完整版】的 START.bat 启动 —— 包里自带 Windows 版 Java（runtime\\jre-win），会自动用上；\n"
+                 "  2) 已经在玩 Minecraft 的话，Java 一定在机器上：主菜单 3【设置】里把 Java 路径填成\n"
+                 "     ...\\bin\\java.exe（官方启动器/PCL 自带的在 %APPDATA%\\.minecraft\\runtime\\ 里面）；\n"
+                 "  3) 装一个 Java 21： https://adoptium.net/ （装完重开这个窗口）")
+    return _("没找到能用的 Java。两个办法：\n"
+             "  1) 用 bash run.sh 启动（它会自动用包里自带的 runtime/jre）；\n"
+             "  2) 或者 sudo apt install -y openjdk-21-jre-headless")
 
 
 # ------------------------------------------------------------------ 路径自适应
@@ -355,7 +355,7 @@ def find_observations(save=None):
     for start in starts:
         # ① 自己这层 + 往上每一层
         p = start
-        for _ in range(8):
+        for _i in range(8):
             for name in OBS_NAMES:
                 cand = os.path.join(p, name)
                 if os.path.isfile(cand):
@@ -366,7 +366,7 @@ def find_observations(save=None):
             p = parent
         # ② .minecraft/versions/*/seedhelper-observations.txt（换过版本也找得到）
         p = start
-        for _ in range(8):
+        for _i in range(8):
             for name in OBS_NAMES:
                 hits = sorted(glob.glob(os.path.join(p, "versions", "*", name)))
                 if hits:
@@ -437,14 +437,14 @@ def get_seed(required=True):
     cfg = load()
     seed = cfg.get("seed")
     if seed is None and required:
-        print("还没有种子。先跑 tool.py 选 1（计算种子），或在设置里手动填一个。")
+        print(_("还没有种子。先跑 tool.py 选 1（计算种子），或在设置里手动填一个。"))
     return seed
 
 
 def mask(seed, show=False):
     """默认打码显示，防止截图/复述的时候漏出去"""
     if seed is None:
-        return "（没有）"
+        return _("（没有）")
     s = str(seed)
     if show or len(s) < 8:
         return s
@@ -465,13 +465,13 @@ if __name__ == "__main__":
     cfg = load()
     if len(sys.argv) > 1 and sys.argv[1] == "set" and len(sys.argv) > 2:
         set_seed(sys.argv[2])
-        print("种子已写入", CONFIG_PATH)
+        print(_("种子已写入"), CONFIG_PATH)
     elif len(sys.argv) > 1 and sys.argv[1] == "show":
-        print("配置文件:", CONFIG_PATH)
+        print(_("配置文件:"), CONFIG_PATH)
         print(json.dumps(load(), ensure_ascii=False, indent=2))
     else:
-        print("配置文件:", CONFIG_PATH)
-        print("种子:", mask(cfg.get("seed"), cfg.get("show_seed")))
-        print("版本:", cfg.get("mc"))
-        print("存档:", cfg.get("save"))
+        print(_("配置文件:"), CONFIG_PATH)
+        print(_("种子:"), mask(cfg.get("seed"), cfg.get("show_seed")))
+        print(_("版本:"), cfg.get("mc"))
+        print(_("存档:"), cfg.get("save"))
         print("java:", find_java())
