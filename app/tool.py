@@ -458,7 +458,7 @@ def do_update():
     if ask(_("  现在更新吗") + " [Y/n]: ", default="y").lower() == "n":
         return
     changed, m = updater.update(verbose=True)
-    print("  " + (ui.ok(m) if changed else ui.info(m or "没有更新")))
+    print("  " + (ui.ok(m) if changed else ui.info(m or _("没有更新"))))
     if changed:
         print("  " + ui.info(_("完整代码 diff 存在 记录/更新日志/ 里，想看细节随时翻")))
 
@@ -522,13 +522,13 @@ def do_rollback():
         rows.append((str(i), _("回滚到 {ver}", ver=ver), _("{when} · {n} 个文件", when=when, n=count)))
     print(ui.menu(_("选一个版本"), rows + [("0", _("返回"), "")]))
     print()
-    pick = ask("选一个: ", allow_empty=True)
+    pick = ask(_("选一个: "), allow_empty=True)
     if not pick or not pick.isdigit() or not (1 <= int(pick) <= len(rows)):
-        print("  " + ui.info("取消。"))
+        print("  " + ui.info(_("取消。")))
         return
     ver = items[int(pick) - 1][0]
     if ask(_("确认回滚到 {ver}？回滚后要重启才会生效", ver=ver) + " [y/N]: ", default="n").lower() != "y":
-        print("  " + ui.info("取消。"))
+        print("  " + ui.info(_("取消。")))
         return
     ok, msg = updater.rollback(ver)
     diag.log("回滚", 目标=ver, 结果=msg, 成功=ok)
@@ -578,7 +578,16 @@ def do_feedback():
 def main():
     ui.init_console()          # 输出别攒着：管道里也要一行一行实时出来
     cfg = load_config()
-    # 语言：配置里存的优先；第一次用还没存过就按系统区域猜一个
+    # 语言：配置里存的优先。第一次用（配置里还没有 lang）先把语言问清楚 ——
+    # 这一步必须赶在开屏和用户协议前面，否则英文用户第一眼看的就是一屏中文，
+    # 协议卡片尤其刺眼（onboard.pick_language 本来就是为这个写的）。
+    if not cfg.get("lang"):
+        try:
+            onboard.pick_language(ask, cfg)
+        except (EOFError, KeyboardInterrupt):   # 这一步在 try/except 主循环外面，自己兜住
+            print()
+            return
+        save_config(cfg)
     i18n.set_lang(cfg.get("lang") or i18n.guess_from_system())
     first = cfg.get("seed") is None
     diag.install_excepthook()
@@ -664,7 +673,9 @@ def main():
                 print(ui.section(_("用户协议与隐私政策")))
                 print(agreement.full_text())
                 print()
-                print(ui.info(_("当前同意的是 v{ver}；文件在 docs/用户协议与隐私政策.md", ver=agreement.AGREEMENT_VERSION)))
+                print(ui.info(_("当前同意的是 v{ver}；文件在 docs/{doc}",
+                                ver=agreement.AGREEMENT_VERSION,
+                                doc=agreement.doc_name())))
             elif choice == "7":
                 do_export()
             elif choice == "8":
@@ -672,11 +683,11 @@ def main():
             elif choice == "9":
                 egg.run(cfg)
             else:
-                print(ui.err("没这个选项"))
+                print(ui.err(_("没这个选项")))
             first = cfg.get("seed") is None
             print()
     except (EOFError, KeyboardInterrupt):
-        print("\n再见~")
+        print("\n" + _("再见~"))
 
 
 if __name__ == "__main__":

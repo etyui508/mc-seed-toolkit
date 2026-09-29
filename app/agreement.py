@@ -58,15 +58,21 @@ def full_text():
                "\n".join(f"· {_(t)}：{_(d)}" for t, d in POINTS)
 
 
+def doc_name():
+    """当前语言该看哪份协议文档的文件名（中英各一份，别让英文用户去翻中文名）"""
+    if i18n.current() == "en" and os.path.isfile(DOC_EN):
+        return os.path.basename(DOC_EN)
+    return os.path.basename(DOC)
+
+
 def show(ask, width=None):
     """把协议摆出来，问用户同不同意。ask 是工具里那个输入函数"""
     import ui
-    doc_name = os.path.basename(DOC_EN) if i18n.current() == "en" else os.path.basename(DOC)
     print()
     print(ui.box(
         [ui.s(_("第一次运行，先花十秒看一遍这几条："), "bold")] +
         [""] + [f"{ui.s('·', 'dim')} {ui.s(_(t), 'key')} —— {_(d)}" for t, d in POINTS] + [""] +
-        [ui.s(_("  版本 v{ver} · 全文在 docs/{doc}", ver=AGREEMENT_VERSION, doc=doc_name), "hint")],
+        [ui.s(_("  版本 v{ver} · 全文在 docs/{doc}", ver=AGREEMENT_VERSION, doc=doc_name()), "hint")],
         title=_("用户协议 & 隐私政策"), width=width))
     print()
     print("  " + ui.info(_("看全文：主菜单里随时可以再翻（或者直接打开上面那个 md 文件）")))

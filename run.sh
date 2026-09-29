@@ -19,7 +19,26 @@ fi
 
 # ---------- 界面语言：跟工具里的语言设置对齐 ----------
 # 优先环境变量 MC_LANG（app/i18n.py 也是用它把语言传给子进程），
-# 其次读 .mc-tool.json 里的 "lang"；都认不出来就是中文。
+# 其次读 .mc-tool.json 里的 "lang"；都没有（第一次用）才看系统区域 ——
+# 跟 app/i18n.guess_from_system() 一个规矩：认识中文就中文，其它语言英文。
+# 这一句是启动时第一眼看到的东西，不能比正经界面还先"糊"人一脸中文。
+guess_lang_from_locale() {
+    local v lc
+    for v in "${LC_ALL:-}" "${LC_MESSAGES:-}" "${LANG:-}" "${LANGUAGE:-}"; do
+        lc="$(printf '%s' "$v" | tr 'A-Z' 'a-z')"      # 老 bash（macOS 3.2）没有 ${v,,}
+        case "$lc" in
+            *zh*|*chinese*) printf 'zh'; return ;;
+        esac
+    done
+    for v in "${LC_ALL:-}" "${LC_MESSAGES:-}" "${LANG:-}" "${LANGUAGE:-}"; do
+        lc="$(printf '%s' "$v" | tr 'A-Z' 'a-z')"
+        case "$lc" in
+            ""|c.*|posix) ;;
+            *) printf 'en'; return ;;
+        esac
+    done
+    printf 'zh'
+}
 UI_LANG="zh"
 case "${MC_LANG:-}" in
     en*|EN*) UI_LANG="en" ;;
@@ -28,6 +47,11 @@ case "${MC_LANG:-}" in
         if [ -f "$HERE/.mc-tool.json" ] \
            && grep -q '"lang"[[:space:]]*:[[:space:]]*"en"' "$HERE/.mc-tool.json" 2>/dev/null; then
             UI_LANG="en"
+        elif [ -f "$HERE/.mc-tool.json" ] \
+             && grep -q '"lang"[[:space:]]*:[[:space:]]*"zh"' "$HERE/.mc-tool.json" 2>/dev/null; then
+            UI_LANG="zh"
+        else
+            UI_LANG="$(guess_lang_from_locale)"
         fi
         ;;
 esac

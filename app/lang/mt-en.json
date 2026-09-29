@@ -245,7 +245,6 @@
   "引擎算超时了（城市太多？把半径调小一点）": "Engine time out (too many city? try small radius)",
   "引擎跑不起来（{err}）": "Engine will not run ({err})",
   "当前": "now",
-  "当前同意的是 v{ver}；文件在 docs/用户协议与隐私政策.md": "Currently accept: v{ver}; file live at docs/用户协议与隐私政策.md",
   "当前版本": "Installed",
   "当前用的 Java：{java}": "Java in use: {java}",
   "彩蛋视频不见了（app/assets/egg.html）": "egg video missing (app/assets/egg.html)",
@@ -583,5 +582,6 @@
   "（这 {n} 个版本包里都带现成模组；别的版本也能用，就是要自己编模组）": "({n} versions ship with ready-made mods; other versions work too, you just have to build mod yourself)",
   "（这个终端画不了动画，就先不转了）": "(This terminal cannot draw animation, so no spinning)",
   "（这份清单没带文件列表，只能整个覆盖一遍）": "(This manifest has no file list - falling back to full overwrite)",
-  "；退路（跑游戏本体）也没编 ": "; fallback (running real game) is not built for"
+  "；退路（跑游戏本体）也没编 ": "; fallback (running real game) is not built for",
+  "当前同意的是 v{ver}；文件在 docs/{doc}": "Currently accept: v{ver}; file live at docs/{doc}"
 }

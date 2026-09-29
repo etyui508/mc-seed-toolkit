@@ -87,7 +87,14 @@ def guess_from_system():
     """从系统区域猜一个默认语言：认识中文就中文，否则英文。
 
     只在"配置里还没存过语言"的时候用（首次启动的默认选项）。
+    环境变量 MC_LANG 排在最前面：run.sh 用它告诉工具"这次按哪种语言来"，
+    子进程（Java 工具、calc_seed.py）也靠它知道自己该说什么话。
     """
+    env_lang = (os.environ.get("MC_LANG") or "").strip().lower()
+    if env_lang.startswith(("mt-en", "en")):        # mt-en 要排在 mt 前面
+        return "en"
+    if env_lang.startswith(("mt", "zh")):
+        return "zh"
     for key in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
         value = os.environ.get(key)
         if value:
