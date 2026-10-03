@@ -83,9 +83,40 @@ JAVA_CMD = [JAVA, "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
             "-Dfile.encoding=UTF-8"]
 HAS_CUBIOMES = _has_cubiomes()
 
-def run(cmd, quiet=False):
+# 引擎子进程最多跑这么久：超大半径、畸形存档都可能让它卡死，
+# 以前没有上限，卡住就只能杀进程。想调：MC_ENGINE_TIMEOUT=秒数。
+ENGINE_TIMEOUT = int(os.environ.get("MC_ENGINE_TIMEOUT") or 900)
+
+
+def child_env(extra=None):
+    """给引擎子进程准备环境变量：关键是 MCVER。
+
+    引擎（findstruct 那支 C 程序）只认环境变量 MCVER。以前只有 tool.py 走菜单时
+    设过它，于是文档里教的 `python3 app/calc.py struct ...` 会静默落到引擎的默认
+    版本 —— state.py 早就把用户版本翻译成 cubiomes 认得的 CUBI_VER 了，只是没人用。
+    """
+    env = dict(os.environ)
     try:
-        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+        import state
+        if getattr(state, "CUBI_VER", None):
+            env["MCVER"] = str(state.CUBI_VER)
+    except Exception:
+        pass
+    if extra:
+        env.update({k: str(v) for k, v in extra.items()})
+    return env
+
+
+def run(cmd, quiet=False, timeout=None):
+    limit = timeout or ENGINE_TIMEOUT
+    try:
+        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace",
+                           env=child_env(), timeout=limit)
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print(_("引擎跑了 {n} 秒还没有结果，这次先中止（{cmd}）",
+                    n=int(limit), cmd=os.path.basename(str(cmd[0]))))
+        return ""
     except FileNotFoundError:
         if not quiet:
             print(_("没找到 {cmd}。", cmd=cmd[0]))
@@ -259,9 +290,18 @@ def _run_find_parallel(cx, cz, chunks_radius, top, min_dist, max_dist, nobiome=F
                     [FINDSTRUCT, "findrect", str(state.SEED), str(bx0), str(z0), str(bx1), str(z1),
                      str(cx), str(cz), str(chunks_radius), str(top), str(min_dist), str(max_dist),
                      "1" if nobiome else "0"],
-                    stdout=out_fh, stderr=err_fh)
+                    stdout=out_fh, stderr=err_fh, env=child_env())
                 procs.append((p, out_fh, err_fh, out_path, err_path))
             if len(procs) < 2:
+                # 只有一条带就没必要并行了：先把已经开出去的收拾干净再退回单进程，
+                # 不然句柄和子进程会拖到 TemporaryDirectory 清理时报错。
+                for p, out_fh, err_fh, *_rest in procs:
+                    if p.poll() is None:
+                        p.kill()
+                        p.wait(timeout=5)
+                    out_fh.close()
+                    err_fh.close()
+                procs = []
                 return None
             parts = []
             for p, out_fh, err_fh, out_path, err_path in procs:

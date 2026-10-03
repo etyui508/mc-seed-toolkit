@@ -108,9 +108,9 @@ def main():
         root = os.path.join(tmp, "toolkit")
         os.makedirs(os.path.join(root, "app"))
         os.makedirs(os.path.join(root, "记录"))
-        open(os.path.join(root, "app", "probe.py"), "w").write("OLD\n")
-        open(os.path.join(root, "app", "VERSION"), "w").write("1.0.0\n")
-        open(os.path.join(root, ".mc-tool.json"), "w").write('{"seed": 42}\n')
+        open(os.path.join(root, "app", "probe.py"), "w", newline="\n").write("OLD\n")
+        open(os.path.join(root, "app", "VERSION"), "w", newline="\n").write("1.0.0\n")
+        open(os.path.join(root, ".mc-tool.json"), "w", newline="\n").write('{"seed": 42}\n')
 
         updater.ROOT = root
         updater.RECORDS = os.path.join(root, "记录")
@@ -125,9 +125,9 @@ def main():
 
         def reset():
             """每条用例都从"旧版本、干净沙箱"开始"""
-            open(os.path.join(root, "app", "probe.py"), "w").write("OLD\n")
-            open(os.path.join(root, "app", "VERSION"), "w").write("1.0.0\n")
-            open(os.path.join(root, ".mc-tool.json"), "w").write('{"seed": 42}\n')
+            open(os.path.join(root, "app", "probe.py"), "w", newline="\n").write("OLD\n")
+            open(os.path.join(root, "app", "VERSION"), "w", newline="\n").write("1.0.0\n")
+            open(os.path.join(root, ".mc-tool.json"), "w", newline="\n").write('{"seed": 42}\n')
 
         print("=" * 60)
         print("  防篡改机制自测（离线，造各种坏清单去打真 update()）")

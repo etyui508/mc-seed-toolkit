@@ -45,6 +45,9 @@ def init_lang():
 OUT = os.path.join(ROOT, "out")
 DEFAULT_OBS = ""
 LOG = os.path.join(ROOT, "记录", "算种子记录.txt")
+# Java 那几支最多跑多久：超大半径 / 畸形存档会让它卡死，以前没有上限，
+# 卡住就只能杀进程。想调：MC_JAVA_TIMEOUT=秒数。
+JAVA_TIMEOUT = int(os.environ.get("MC_JAVA_TIMEOUT") or 1800)
 JAVA = cfgmod.find_java()
 JAVA_CMD = ([JAVA, "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dfile.encoding=UTF-8"]
             if JAVA else [])
@@ -54,7 +57,11 @@ def java(cls, *args):
     if not JAVA:
         return _("（没有可用的 Java）")
     cmd = JAVA_CMD + ["-cp", OUT, cls] + [str(a) for a in args]
-    r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+    try:
+        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=JAVA_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return _("（{cls} 跑了 {n} 秒还没有结果，先中止）", cls=cls, n=int(JAVA_TIMEOUT))
     return r.stdout + r.stderr
 
 
@@ -105,6 +112,11 @@ def run_with_progress(cmd, extra_env=None):
 
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
+    # 看门狗：Java 卡死（不报进度也不退出）时下面那个 for 循环会永远等着，
+    # 所以到点直接杀进程 —— finally 里会把进度条收尾，人不会看到半截的条子。
+    killer = threading.Timer(JAVA_TIMEOUT, proc.kill)
+    killer.daemon = True
+    killer.start()
     done_phase = False                      # 当前阶段的 100% 报出来了没有
     try:
         for line in proc.stderr:
@@ -124,6 +136,7 @@ def run_with_progress(cmd, extra_env=None):
         reader.join(timeout=10)
         out = "".join(bucket)
     finally:
+        killer.cancel()
         if proc.poll() is None:
             proc.kill()
         # 收尾：万一最后一帧没报出来（进程被杀/Java 那边没发），
@@ -290,8 +303,14 @@ def main():
     for sv in args.save:
         if not os.path.isdir(sv):
             continue
-        struct_out = subprocess.run(JAVA_CMD + ["-cp", OUT, "RegionScan", sv],
-                                    capture_output=True, encoding="utf-8", errors="replace").stdout
+        try:
+            struct_out = subprocess.run(JAVA_CMD + ["-cp", OUT, "RegionScan", sv],
+                                        capture_output=True, encoding="utf-8",
+                                        errors="replace", timeout=JAVA_TIMEOUT).stdout
+        except subprocess.TimeoutExpired:
+            print(_("（{cls} 跑了 {n} 秒还没有结果，跳过这个存档）",
+                    cls="RegionScan", n=int(JAVA_TIMEOUT)))
+            continue
         print(struct_out.strip())
         report.append(struct_out.strip())
         for line in struct_out.splitlines():

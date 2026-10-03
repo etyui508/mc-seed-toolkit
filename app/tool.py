@@ -374,6 +374,14 @@ def startup_update(man=None, msg=""):
     """
     if os.environ.get("MC_NO_UPDATE") == "1":
         return
+    try:
+        _startup_update(man, msg)
+    except Exception as e:                  # 更新这条路出任何岔子都不该拦着人用工具
+        diag.log("更新检查", 结果="异常：" + repr(e))
+        print("  " + ui.warn(_("更新检查出错了，先跳过（{err}）", err=e)))
+
+
+def _startup_update(man=None, msg=""):
     if updater.auto_update_enabled():
         updater.maybe_update()
         return

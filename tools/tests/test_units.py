@@ -161,7 +161,9 @@ def test_updater_apply():
                           ("记录/坐标记录.txt", "我的历史\n")):
             p = os.path.join(root, rel)
             os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w", encoding="utf-8") as fh:
+            # newline="\n"：Windows 上文本模式会把 \n 写成 \r\n，而 zip 里和清单哈希
+            # 都是 LF —— 不指定的话，这套"没变的跳过、改了的换掉"会全部误判成"变了"。
+            with open(p, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(body)
 
         updater.ROOT = root
@@ -169,7 +171,7 @@ def test_updater_apply():
         updater.BACKUP_DIR = os.path.join(updater.RECORDS, ".update-backup")
         updater.MANAGED_FILE = os.path.join(updater.RECORDS, ".managed-files.json")
         updater.VERSION_FILE = os.path.join(root, "app", "VERSION")
-        with open(updater.VERSION_FILE, "w") as fh:
+        with open(updater.VERSION_FILE, "w", newline="\n") as fh:
             fh.write("1.0.0\n")
 
         zp = os.path.join(tmp, "new.zip")
@@ -201,7 +203,7 @@ def test_updater_apply():
                 raise PermissionError(32, "in use")
             return real(src, dst)
 
-        with open(os.path.join(root, "app", "changed.py"), "w") as fh:
+        with open(os.path.join(root, "app", "changed.py"), "w", newline="\n") as fh:
             fh.write("AGAIN\n")
         with zipfile.ZipFile(zp, "w") as z:
             z.writestr("mc-seed-toolkit/app/tool.py", "TOOL = 1\n")
@@ -230,9 +232,11 @@ def test_updater_plan():
     try:
         root = os.path.join(tmp, "t")
         os.makedirs(os.path.join(root, "app"))
-        open(os.path.join(root, "app", "same.py"), "w").write("A\n")
-        open(os.path.join(root, "app", "mod.py"), "w").write("OLD\n")
-        open(os.path.join(root, "app", "gone.py"), "w").write("BYE\n")
+        # 同上：夹具必须跟 zip 一样是 LF，不然 Windows 上这些用例会假失败
+        for name, body in (("same.py", "A\n"), ("mod.py", "OLD\n"), ("gone.py", "BYE\n")):
+            with open(os.path.join(root, "app", name), "w", encoding="utf-8",
+                      newline="\n") as fh:
+                fh.write(body)
         updater.ROOT = root
         updater.RECORDS = os.path.join(root, "记录")
         updater.MANAGED_FILE = os.path.join(updater.RECORDS, ".managed-files.json")
@@ -255,9 +259,9 @@ def test_updater_plan():
         updater.BACKUP_DIR = os.path.join(updater.RECORDS, ".update-backup")
         backup = os.path.join(updater.BACKUP_DIR, "0.9.0", "app")
         os.makedirs(backup, exist_ok=True)
-        with open(os.path.join(backup, "mod.py"), "w") as fh:
+        with open(os.path.join(backup, "mod.py"), "w", newline="\n") as fh:
             fh.write("RESTORED\n")
-        with open(os.path.join(root, "app", "mod.py"), "w") as fh:
+        with open(os.path.join(root, "app", "mod.py"), "w", newline="\n") as fh:
             fh.write("NEWER\n")
         got = updater.backups()
         check("能看到备份列表", any(v == "0.9.0" for v, _t, _c in got), str(got))
@@ -380,7 +384,7 @@ def test_updater_sources():
         try:
             root3 = os.path.join(tmp3, "t")
             os.makedirs(os.path.join(root3, "app"))
-            with open(os.path.join(root3, "app", "VERSION"), "w") as fh:
+            with open(os.path.join(root3, "app", "VERSION"), "w", newline="\n") as fh:
                 fh.write("1.0.0\n")
             keep = (updater.ROOT, updater.RECORDS, updater.VERSION_FILE)
             updater.ROOT = root3

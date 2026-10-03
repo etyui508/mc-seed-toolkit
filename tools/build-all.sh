@@ -12,6 +12,10 @@ javac --release 17 -encoding UTF-8 -d "$ROOT/out" SeedCracker.java RegionScan.ja
     BlockFind.java PillarScan.java SlimeFind.java FindStructures.java ShipScan.java OreScan.java
 echo "OK -> $ROOT/out/"
 
+# 记下这份源码的指纹：发布前 tools/check-build-sync.py 会拿它比对，
+# 免得"改了源码、忘了重编"的旧二进制被发出去
+python3 "$HERE/check-build-sync.py" --record
+
 if [[ "${1:-}" == "--with-cubiomes" ]]; then
     echo "== 编译 cubiomes 找结构工具（需要 gcc + git）=="
     CUBIOMES_DIR="${CUBIOMES_DIR:-/tmp/cubiomes}"

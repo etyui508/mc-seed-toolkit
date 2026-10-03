@@ -120,6 +120,28 @@ KEEP_BACKUPS = 3                 # 只留最近几个版本的备份
 RETRY_DELAYS = (0.0, 0.3, 0.8, 1.5)   # Windows 上文件被占用时的重试节奏
 
 
+def _safe_rel(rel):
+    """这个相对路径能不能碰？
+
+    "废弃"的名单来自本地账本（unsigned），而 remove_obsolete 会 shutil.move ——
+    这是整个更新器里唯一一条"能把文件挪走"的路。所以只认干干净净的相对路径：
+    不接受绝对路径 / 盘符 / ..，也不接受任何一段落在 KEEP 里（记录、runtime…）。
+    """
+    if not rel or os.path.isabs(rel):
+        return False
+    parts = str(rel).replace("\\", "/").split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return False
+    return not any(p in KEEP for p in parts)
+
+
+def _inside_root(path):
+    """解析完软链接之后，这个路径还在工具目录里吗"""
+    root = os.path.realpath(ROOT)
+    real = os.path.realpath(path)
+    return real == root or real.startswith(root + os.sep)
+
+
 # ------------------------------------------------------------------ 版本
 def local_version():
     try:
@@ -693,6 +715,8 @@ def plan(man):
     for rel, digest in sorted(old.items()):
         if rel in files:
             continue
+        if not _safe_rel(rel):           # 账本被人写脏也不能让它挪走 KEEP 里的东西
+            continue
         local = os.path.join(ROOT, rel)
         if os.path.isfile(local) and _short_hash(local) == digest:
             gone.append(rel)
@@ -780,11 +804,20 @@ def save_diff(text, old_ver, new_ver):
 
 
 def remove_obsolete(gone, version):
-    """把废弃文件挪进备份目录（不是直接删，随时能翻回来）"""
+    """把废弃文件挪进备份目录（不是直接删，随时能翻回来）。
+
+    version 给的是**更新前**那个版本号：替换掉的文件和废弃掉的文件都归到
+    <旧版本>/ 下面，这样"回滚到旧版本"才是一次完整的还原 —— 以前废弃的挪进了
+    <新版本>/废弃/，回滚旧版本时那些文件就回不来了。
+    """
     moved = 0
     dest_root = os.path.join(BACKUP_DIR, version, "废弃")
     for rel in gone:
+        if not _safe_rel(rel):                     # 只信干净路径
+            continue
         src = os.path.join(ROOT, rel)
+        if not _inside_root(src) or not os.path.isfile(src):
+            continue
         dst = os.path.join(dest_root, rel)
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -848,8 +881,8 @@ def backups():
                 continue
             count = 0
             for _root, _dirs, files in os.walk(path):
-                if os.path.basename(_root) == "废弃":
-                    continue
+                # 废弃/ 里的也算：回滚的时候它们是要被放回去的，
+                # 不数进来的话菜单上会显示"0 个文件"，看着像个假的回滚点
                 count += len(files)
             out.append((name, os.path.getmtime(path), count))
     except OSError:
@@ -888,6 +921,8 @@ def rollback(version, verbose=True):
             if rel_dir == "" and name in KEEP:
                 continue
             rel = os.path.join(rel_dir, name) if rel_dir else name
+            if not _safe_rel(rel):          # 备份目录也在"记录/"里，同样不能盲信
+                continue
             put(rel, os.path.join(root, name))
 
     gone_dir = os.path.join(src, "废弃")
@@ -896,6 +931,8 @@ def rollback(version, verbose=True):
         rel_dir = "" if rel_dir == "." else rel_dir
         for name in files:
             rel = os.path.join(rel_dir, name) if rel_dir else name
+            if not _safe_rel(rel):
+                continue
             put(rel, os.path.join(root, name))
 
     if verbose:
@@ -919,6 +956,12 @@ def check():
         return None, _("连不上下载站（HTTP {code}）", code=e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         return None, _("连不上下载站（{err}）", err=e)
+    # 兜底：所有源都没在期限内回来的时候 fetch_manifest 抛的是 RuntimeError，
+    # DNS 解析卡住、TLS 出岔、清单是坏 JSON 也都算"这次查不了"。
+    # 这里绝不能往外抛 —— 引擎层（ui.intro）会把异常吞成 None，调用方（tool.py）
+    # 以为"没查过"就再裸调一次，最后整个工具在没网的时候直接崩在开屏那一步。
+    except Exception as e:
+        return None, _("更新检查出错了（{err}）", err=e)
     trust, why = verify_release(man)
     if not trust and not ALLOW_UNSIGNED:
         return None, (_("⚠⚠ 清单签名校验没过：{why}\n"
@@ -946,6 +989,8 @@ def update(force=False, verbose=True):
         return False, _("连不上下载站，跳过更新（HTTP {code}）", code=e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         return False, _("连不上下载站，跳过更新（{err}）", err=e)
+    except Exception as e:                     # 同 check()：更新失败再怎么说也不该崩
+        return False, _("更新检查出错了，跳过更新（{err}）", err=e)
 
     remote = str(man.get("version") or "").strip()
     if not remote:
@@ -1023,10 +1068,12 @@ def update(force=False, verbose=True):
     # 把废弃文件挪到备份里（只挪"上次是我们发的、你也没改过"的）
     gone = (plan(man) or {}).get("gone") or []
     if gone:
-        moved = remove_obsolete(gone, remote)
+        # 用**旧**版本号：回滚到旧版本时，被替换的（<旧版本>/ 里）和被废弃的
+        # （<旧版本>/废弃/ 里）才能一起放回去
+        moved = remove_obsolete(gone, local)
         if moved and verbose:
             print(_("  （清掉 {n} 个废弃文件，旧的放在 记录/.update-backup/{version}/废弃/）",
-                    n=moved, version=remote))
+                    n=moved, version=local))
     if man.get("files"):
         _save_managed(man["files"], remote)
 
