@@ -18,6 +18,10 @@ EXCLUDE_FILES = {".mc-tool.json", ".tool-config.json", "坐标记录.txt", "算�
                  "struct-hints.txt", "seed-confirmed.txt", "coordinates.txt", "portal-info.txt",
                  "observations-merged.txt", ".seedcalc-obs.txt"}
 EXCLUDE_PREFIX = (".cache-gateways-", ".end_gateways")
+# 私钥/令牌这类东西绝不能进包：以前排除表里没有 *.key，
+# 全靠"私钥刚好不在源目录里"这一条运气。现在按后缀再兜一道。
+EXCLUDE_SUFFIX = (".key", ".pem", ".token", ".pfx", ".p12")
+EXCLUDE_DIRS = EXCLUDE_DIRS | {".mc-keys", ".cloudflared", ".ssh"}
 # 两个版本的说明各带各的：精简版别把"U 盘版（自带 Java）"那份带上，完整版也别带"精简版"那份
 EXECUTABLE = ("out/findstruct", "out/findstruct.exe", "run.sh",
               "tools/build-all.sh", "tools/build-cubiomes.sh", "tools/build-findstruct-win.sh",
@@ -35,9 +39,28 @@ def mode_for(rel):
     return 0o644
 
 
+def assert_no_secrets():
+    """打包前自查：源目录里不该躺着私钥 / 令牌。
+
+    排除表已经把 *.key 之类挡在包外了，这里再兜一道 —— 万一哪天有人把
+    私钥丢进项目目录，宁可让打包失败，也别让它在某个包里悄悄发出去。
+    """
+    bad = []
+    for root, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for name in files:
+            if name.lower().endswith(EXCLUDE_SUFFIX):
+                bad.append(os.path.relpath(os.path.join(root, name), ROOT))
+    if bad:
+        raise SystemExit("❌ 源目录里有私钥/令牌，先挪走再打包：\n  "
+                         + "\n  ".join(bad[:5])
+                         + f"\n（共 {len(bad)} 个）")
+
+
 def main():
     argv = sys.argv[1:]
     lite = "--lite" in argv
+    assert_no_secrets()
     top_override = None
     rest = []
     i = 0
@@ -67,7 +90,8 @@ def main():
             for name in sorted(files):
                 full = os.path.join(root, name)
                 rel = os.path.relpath(full, ROOT).replace(os.sep, "/")
-                if name in EXCLUDE_FILES or name.startswith(EXCLUDE_PREFIX):
+                if (name in EXCLUDE_FILES or name.startswith(EXCLUDE_PREFIX)
+                        or name.lower().endswith(EXCLUDE_SUFFIX)):
                     continue
                 mode = mode_for(rel)
                 info = zipfile.ZipInfo(f"{top}/{rel}")

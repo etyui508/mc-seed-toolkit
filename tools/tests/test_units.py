@@ -226,6 +226,66 @@ def test_updater_apply():
         updater.VERSION_FILE = os.path.join(APP, "VERSION")
 
 
+def test_updater_verify_files():
+    section("更新包必须跟签名清单对得上（多出来的文件 / 哈希不符都拒装）")
+    tmp = tempfile.mkdtemp(prefix="mc-verify-")
+    saved = (updater.ROOT, updater.RECORDS, updater.BACKUP_DIR,
+             updater.MANAGED_FILE, updater.VERSION_FILE)
+    try:
+        root = os.path.join(tmp, "toolkit")
+        os.makedirs(os.path.join(root, "app"))
+        for rel, body in (("app/tool.py", b"TOOL = 1\n"), ("app/VERSION", b"1.0.0\n")):
+            with open(os.path.join(root, rel), "wb") as fh:
+                fh.write(body)
+        updater.ROOT = root
+        updater.RECORDS = os.path.join(root, "记录")
+        updater.BACKUP_DIR = os.path.join(updater.RECORDS, ".update-backup")
+        updater.MANAGED_FILE = os.path.join(updater.RECORDS, ".managed-files.json")
+        updater.VERSION_FILE = os.path.join(root, "app", "VERSION")
+        short = lambda b: hashlib.sha256(b).hexdigest()[:16]        # noqa: E731
+
+        def pkg(extra=None):
+            zp = os.path.join(tmp, "pkg.zip")
+            with zipfile.ZipFile(zp, "w") as z:
+                z.writestr("mc-seed-toolkit/app/tool.py", "TOOL = 2\n")
+                z.writestr("mc-seed-toolkit/app/VERSION", "2.0.0\n")
+                if extra:
+                    z.writestr(extra[0], extra[1])
+            return zp
+
+        signed = {"app/tool.py": short(b"TOOL = 2\n"), "app/VERSION": short(b"2.0.0\n")}
+
+        got = updater.apply_zip(pkg(), verbose=False, files=signed)
+        check("清单齐全时正常安装", got["changed"] == 2, str(got))
+
+        # 还原成旧内容，试攻击场景
+        for rel, body in (("app/tool.py", b"TOOL = 1\n"), ("app/VERSION", b"1.0.0\n")):
+            with open(os.path.join(root, rel), "wb") as fh:
+                fh.write(body)
+        try:
+            updater.apply_zip(pkg(("mc-seed-toolkit/app/evil.py", "pwned\n")),
+                              verbose=False, files=signed)
+            check("包里多出来的文件会拒装", False, "没拦住")
+        except Exception:
+            check("包里多出来的文件会拒装", True)
+        check("被拒时装都没动", open(os.path.join(root, "app/tool.py")).read().strip() == "TOOL = 1")
+        check("恶意文件没落盘", not os.path.exists(os.path.join(root, "app/evil.py")))
+
+        bad = dict(signed, **{"app/tool.py": "0" * 16})
+        try:
+            updater.apply_zip(pkg(), verbose=False, files=bad)
+            check("哈希对不上会拒装", False, "没拦住")
+        except Exception:
+            check("哈希对不上会拒装", True)
+
+        got = updater.apply_zip(pkg(), verbose=False, files=None)
+        check("老清单（没有 files 字段）照常能装", got["changed"] == 2, str(got))
+    finally:
+        (updater.ROOT, updater.RECORDS, updater.BACKUP_DIR,
+         updater.MANAGED_FILE, updater.VERSION_FILE) = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_updater_plan():
     section("更新差异对比（改 / 新增 / 废弃）")
     tmp = tempfile.mkdtemp(prefix="mc-plan-")
@@ -805,6 +865,7 @@ def main():
     test_ui()
     test_diag()
     test_updater_apply()
+    test_updater_verify_files()
     test_updater_plan()
     test_updater_sources()
     test_spinner()

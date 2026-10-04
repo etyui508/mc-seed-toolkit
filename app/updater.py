@@ -509,7 +509,7 @@ def _top_dir(names):
     return None
 
 
-def apply_zip(zip_path, verbose=True):
+def apply_zip(zip_path, verbose=True, files=None):
     """把 zip 解出来覆盖到工具目录。
 
     返回 {'changed': 换掉几个, 'skipped': 没变跳过几个, 'failed': [(相对路径, 原因), ...]}
@@ -519,9 +519,13 @@ def apply_zip(zip_path, verbose=True):
       · 先写 xxx.new 再 os.replace 原子替换 —— 中途崩了也不会剩半个文件
       · 被占用（Windows 上 WinError 32）就等一会儿重试
       · 换之前把旧的备份到 记录/.update-backup/<版本>/
+
+    files：签名清单里的 {"相对路径": 短哈希}。传了它就**只认清单**：
+    包里多出来的条目一律不落盘，清单里声明的文件哈希对不上就整个中止（动都不动）。
+    没传（老清单没有 files 字段）就退回老行为，保持兼容。
     """
     tmp = tempfile.mkdtemp(prefix="mc-update-")
-    result = {"changed": 0, "skipped": 0, "failed": []}
+    result = {"changed": 0, "skipped": 0, "failed": [], "unexpected": []}
     try:
         with zipfile.ZipFile(zip_path) as z:
             names = z.namelist()
@@ -530,6 +534,29 @@ def apply_zip(zip_path, verbose=True):
         src = os.path.join(tmp, top) if top else tmp
         if not os.path.isfile(os.path.join(src, "app", "tool.py")):
             raise RuntimeError(_("这个包里没有 app/tool.py，不像工具包，先不动"))
+
+        # ① 先全量对一遍哈希，再决定动不动 —— 免得改了一半才发现包里对不上
+        if files is not None:
+            bad = []
+            for dirpath, dirnames, filenames in os.walk(src):
+                dirnames[:] = [d for d in dirnames if d not in KEEP]
+                for name in filenames:
+                    full = os.path.join(dirpath, name)
+                    rel = os.path.relpath(full, src).replace(os.sep, "/")
+                    if name in KEEP:
+                        continue
+                    want = files.get(rel)
+                    if want is None:
+                        result["unexpected"].append(rel)
+                        continue
+                    if _short_hash(full) != want:
+                        bad.append(rel)
+            if result["unexpected"]:
+                head = "；".join(result["unexpected"][:3])
+                raise RuntimeError(_("包里有清单没声明的文件（{head}）—— 拒绝安装", head=head))
+            if bad:
+                head = "；".join(bad[:3])
+                raise RuntimeError(_("包里的文件和签名清单对不上（{head}）—— 拒绝安装", head=head))
 
         backup = os.path.join(BACKUP_DIR, local_version())
         for dirpath, dirnames, filenames in os.walk(src):
@@ -546,6 +573,8 @@ def apply_zip(zip_path, verbose=True):
                 src_file = os.path.join(dirpath, name)
                 dst_file = os.path.join(ROOT, rel_dir, name)
                 rel = os.path.join(rel_dir, name) if rel_dir else name
+                if files is not None and os.path.join(rel_dir, name).replace(os.sep, "/") not in files:
+                    continue                      # 清单没声明的不装（上面已经拒过了，这里兜底）
                 if _same_file(src_file, dst_file):
                     result["skipped"] += 1
                     continue
@@ -995,6 +1024,11 @@ def update(force=False, verbose=True):
     remote = str(man.get("version") or "").strip()
     if not remote:
         return False, _("线上的 manifest 里没有版本号，跳过")
+    # 线上比本地旧（降级）一律不干，--force 也不行：降级走主菜单 8 的回滚，
+    # 那条路是从本地备份还原，不会把一个"更旧的包"从网上拉进来。
+    if is_newer(local, remote):
+        return False, _("线上是 v{remote}，比本地的 v{local} 还旧 —— 拒绝降级"
+                        "（想回旧版本用主菜单 8【回滚】）", remote=remote, local=local)
     if not force and not is_newer(remote, local):
         return False, ""                      # 静默：平时就该这么安静
 
@@ -1054,7 +1088,7 @@ def update(force=False, verbose=True):
                                on_progress=progress_printer(), verbose=verbose)
         if verbose:
             _report_diffs(tmp_zip, local, remote)
-        result = apply_zip(tmp_zip, verbose=verbose)
+        result = apply_zip(tmp_zip, verbose=verbose, files=man.get("files"))
     except Exception as e:
         return False, _("更新失败：{err}（这次就先按旧版本跑）", err=e)
     finally:

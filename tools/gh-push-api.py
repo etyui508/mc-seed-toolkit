@@ -19,7 +19,48 @@ import urllib.error
 import urllib.request
 
 API = "https://api.github.com"
-TOKEN = open(os.path.expanduser("~/.mc-keys/github.token")).read().strip()
+
+
+def _can_write(tok, repo):
+    """这把令牌能不能写？建一个 1 字节的 blob 试一下（不引用任何提交，等于不留痕迹）"""
+    req = urllib.request.Request(
+        f"{API}/repos/{repo}/git/blobs",
+        data=b'{"content":"a","encoding":"utf-8"}',
+        headers={"Authorization": "token " + tok, "Accept": "application/vnd.github+json",
+                 "User-Agent": "mc-seed-toolkit", "Content-Type": "application/json"},
+        method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=30)
+        return True
+    except Exception:
+        return False
+
+
+def pick_token(repo):
+    """挑一把真能写的令牌：细粒度那把可能只读，经典那把可能被吊销（都撞过）"""
+    cands = []
+    for name in ("github.token.fine", "github.token"):
+        p = os.path.expanduser(f"~/.mc-keys/{name}")
+        if os.path.isfile(p):
+            t = open(p, encoding="utf-8").read().strip()
+            if t:
+                cands.append((name, t))
+    env = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if env:
+        cands.append(("GITHUB_TOKEN", env))
+    if not cands:
+        raise SystemExit("找不到 GitHub 令牌（~/.mc-keys/github.token(.fine) 或 GITHUB_TOKEN）")
+    for i, (name, tok) in enumerate(cands):
+        if _can_write(tok, repo):
+            if i:
+                print(f"（用 {name} 这把令牌：{cands[0][0]} 不能写）")
+            return tok
+    print("⚠ 几把 GitHub 令牌都只能读、不能写 —— 推源码会失败。"
+          "细粒度令牌去把 Contents 改成 Read and write，或用勾了 repo 的经典令牌。")
+    return cands[0][1]
+
+
+TOKEN = ""        # main() 里挑好再赋值（那时候才知道是哪个仓库）
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -37,6 +78,9 @@ def call(method, path, payload=None, tries=4):
                 return json.loads(r.read().decode() or "{}")
         except urllib.error.HTTPError as e:
             body = e.read().decode()[:200]
+            if e.code == 403 and "not accessible" in body:
+                body += ("\n   ↑ 令牌能读不能写：细粒度令牌要把 Contents 改成 Read and write，"
+                         "或者用勾了 repo 的经典令牌")
             if e.code in (500, 502, 503) and i + 1 < tries:
                 time.sleep(2 * (i + 1))
                 continue
@@ -67,7 +111,9 @@ def tracked_files():
 
 
 def main():
+    global TOKEN
     repo = sys.argv[1]
+    TOKEN = pick_token(repo)          # 现在知道是哪个仓库了，挑一把真能写的令牌
     branch = "main"
     if "--branch" in sys.argv:
         branch = sys.argv[sys.argv.index("--branch") + 1]
